@@ -137,6 +137,20 @@ impl Store {
     }
     // Write transactions use IMMEDIATE so the busy timeout applies before any
     // snapshot is read. DEFERRED read-to-write upgrades can fail with BUSY_SNAPSHOT.
+    /// 分层年龄判定：以邮件日期为准，日期缺失或不可解析时回退本地存档时间。
+    fn older_than_cutoff(
+        date: &str,
+        saved_at: &str,
+        cutoff: &chrono::DateTime<chrono::Utc>,
+    ) -> bool {
+        let ts = chrono::DateTime::parse_from_rfc3339(date)
+            .or_else(|_| chrono::DateTime::parse_from_rfc3339(saved_at))
+            .ok();
+        match ts {
+            Some(t) => t.with_timezone(&chrono::Utc) < *cutoff,
+            None => false, // 时间不可靠的不搬迁
+        }
+    }
     /// 预览：当前有多少封/多少字节待搬迁，以及外置根是否可达。
     pub fn tier_pending(&self) -> Result<(u64, u64, bool)> {
         let prefs = self.preferences()?;
@@ -153,25 +167,29 @@ impl Store {
         let db = self.db()?;
         let mut stmt = db
             .prepare(
-                "SELECT COALESCE(json_extract(data,'$.relPath'),''), json_extract(data,'$.savedAt')
+                "SELECT COALESCE(json_extract(data,'$.relPath'),''), json_extract(data,'$.date'),
+                        json_extract(data,'$.savedAt')
                  FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1",
             )
             .map_err(err)?;
         let rows = stmt
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                ))
+            })
             .map_err(err)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(err)?;
         let mut count = 0u64;
         let mut bytes = 0u64;
-        for (rel, saved_at) in rows {
+        for (rel, date, saved_at) in rows {
             if rel.is_empty() || !self.root.join(&rel).exists() {
                 continue; // 已搬迁或在线邮件
             }
-            let ok = chrono::DateTime::parse_from_rfc3339(&saved_at)
-                .map(|t| t.with_timezone(&chrono::Utc) < cutoff)
-                .unwrap_or(false);
-            if ok {
+            if Self::older_than_cutoff(&date, &saved_at, &cutoff) {
                 count += 1;
                 bytes += std::fs::metadata(self.root.join(&rel))
                     .map(|m| m.len())
@@ -206,7 +224,8 @@ impl Store {
         let db = self.db()?;
         let mut stmt = db
             .prepare(
-                "SELECT id, hash, COALESCE(json_extract(data,'$.relPath'),''), json_extract(data,'$.savedAt')
+                "SELECT id, hash, COALESCE(json_extract(data,'$.relPath'),''),
+                        json_extract(data,'$.date'), json_extract(data,'$.savedAt')
                  FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1",
             )
             .map_err(err)?;
@@ -217,20 +236,17 @@ impl Store {
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
                 ))
             })
             .map_err(err)?
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(err)?;
-        for (id, hash, rel, saved_at) in rows {
+        for (id, hash, rel, date, saved_at) in rows {
             if rel.is_empty() {
                 continue;
             }
-            let saved_at = match chrono::DateTime::parse_from_rfc3339(&saved_at) {
-                Ok(t) => t.with_timezone(&chrono::Utc),
-                Err(_) => continue, // 时间不可靠的不搬迁
-            };
-            if saved_at >= cutoff {
+            if !Self::older_than_cutoff(&date, &saved_at, &cutoff) {
                 report.pending += 1;
                 continue;
             }

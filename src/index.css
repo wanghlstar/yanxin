@@ -105,13 +105,31 @@ kbd {
   background: var(--primary);
   color: var(--primary-foreground);
 }
+/* 滚动条：够宽才抓得住，thumb 有明显底色和 hover 反馈 */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 11px;
+  height: 11px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--secondary);
+  background: var(--muted-foreground);
   border-radius: 6px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  min-height: 32px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--foreground);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:active {
+  background: var(--foreground);
+  background-clip: content-box;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 .dark {
   --background: oklch(0.145 0 0);

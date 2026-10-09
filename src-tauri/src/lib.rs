@@ -211,6 +211,35 @@ async fn retry_rule_execution(state: tauri::State<'_, AppState>, id: String) -> 
 fn save_rules(state: tauri::State<AppState>, rules: Vec<Rule>) -> Result<()> {
     state.store.save_rules(&rules)
 }
+/// 读取文本文件内容（规则导入用；限制在用户有权限访问的路径）。
+#[tauri::command]
+fn read_text_file(path: String) -> Result<String> {
+    let p = Path::new(&path);
+    if !p.is_absolute() {
+        return Err("请选择绝对路径".into());
+    }
+    std::fs::read_to_string(p).map_err(err)
+}
+/// 导入规则：校验通过、同名跳过，其余追加。返回新增数量。
+#[tauri::command]
+fn import_rules(state: tauri::State<AppState>, rules: Vec<Rule>) -> Result<usize> {
+    let mut existing = state.store.rules()?;
+    let names: Vec<String> = existing.iter().map(|r| r.name.clone()).collect();
+    let mut added = 0usize;
+    for mut r in rules {
+        rules::validate(&r)?;
+        if names.contains(&r.name) {
+            continue; // 同名跳过，避免重复导入
+        }
+        if r.id.is_empty() {
+            r.id = uuid::Uuid::new_v4().to_string();
+        }
+        existing.push(r);
+        added += 1;
+    }
+    state.store.save_rules(&existing)?;
+    Ok(added)
+}
 #[tauri::command]
 fn preview_rule(state: tauri::State<AppState>, rule: Rule) -> Result<Vec<String>> {
     state.store.preview_rule(&rule)
@@ -1518,6 +1547,8 @@ pub fn run() {
             server_operations,
             retry_server_operation,
             save_rules,
+            read_text_file,
+            import_rules,
             rule_executions,
             retry_rule_execution,
             preview_rule,

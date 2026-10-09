@@ -2449,7 +2449,7 @@ fn tier_archives_moves_old_files_and_writes_index() {
     prefs.archive_index_enabled = true;
     s.save_preferences(&prefs).unwrap();
     s.refresh_archive_roots().unwrap();
-    // 把 raw() 那封的 savedAt 改到 60 天前
+    // 把 raw() 那封的邮件日期改到 60 天前（分层以邮件日期为准）
     let raw_hash = archive::digest(&raw());
     let mut old = s
         .snapshot(&query())
@@ -2458,7 +2458,7 @@ fn tier_archives_moves_old_files_and_writes_index() {
         .into_iter()
         .find(|m| m.hash == raw_hash)
         .unwrap();
-    old.saved_at = (chrono::Utc::now() - chrono::Duration::days(60)).to_rfc3339();
+    old.date = (chrono::Utc::now() - chrono::Duration::days(60)).to_rfc3339();
     let old_rel = old.rel_path.clone().unwrap();
     s.update_mail(&old).unwrap();
     // 待搬迁预览 = 1

@@ -2,6 +2,7 @@ import { SelectField, SelectOption } from "@/components/ui/select-field";
 import { useEffect, useState } from "react";
 import {
   Plus,
+  Upload,
   ArrowDown,
   ArrowUp,
   ArrowRight,
@@ -26,7 +27,7 @@ import {
   DialogDescription,
 } from "./ui/dialog";
 import type { Rule, Snapshot, FolderSettings } from "@/lib/types";
-import { call } from "@/lib/api";
+import { call, isDemo } from "@/lib/api";
 import { toast } from "sonner";
 import { SelectGroup } from "./ui/select";
 import { RuleServerFolders } from "./rule-server-folders";
@@ -101,6 +102,34 @@ export function RulesPanel({
       return false;
     }
   }
+  async function importRules() {
+    if (isDemo()) {
+      toast.error("演示模式不支持导入");
+      return;
+    }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        multiple: false,
+        filters: [{ name: "规则 JSON", extensions: ["json"] }],
+        title: "选择规则文件",
+      });
+      if (!picked || typeof picked !== "string") return;
+      const text = await call<string>("read_text_file", { path: picked });
+      const parsed = JSON.parse(text) as Rule[];
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        toast.error("文件中没有可导入的规则");
+        return;
+      }
+      const added = await call<number>("import_rules", { rules: parsed });
+      toast.success(
+        added ? `已导入 ${added} 条规则` : "没有新规则（同名已跳过）",
+      );
+      onChange();
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
   async function run() {
     setBusy(true);
     try {
@@ -129,27 +158,37 @@ export function RulesPanel({
           </div>
           <p>设置一次规则，把更多时间留给重要的事。</p>
         </div>
-        <Button
-          onClick={() => {
-            setPreview(null);
-            setEditing({
-              id: crypto.randomUUID(),
-              name: "",
-              accountId: "",
-              enabled: true,
-              mode: "all",
-              conditions: [
-                { field: "subject", operator: "contains", value: "" },
-              ],
-              action: "folder",
-              destination: "",
-              stop: true,
-            });
-          }}
-        >
-          <Plus size={16} />
-          新建规则
-        </Button>
+        <div className="page-title-actions">
+          <Button
+            variant="outline"
+            onClick={() => void importRules()}
+            disabled={busy}
+          >
+            <Upload size={16} />
+            导入…
+          </Button>
+          <Button
+            onClick={() => {
+              setPreview(null);
+              setEditing({
+                id: crypto.randomUUID(),
+                name: "",
+                accountId: "",
+                enabled: true,
+                mode: "all",
+                conditions: [
+                  { field: "subject", operator: "contains", value: "" },
+                ],
+                action: "folder",
+                destination: "",
+                stop: true,
+              });
+            }}
+          >
+            <Plus size={16} />
+            新建规则
+          </Button>
+        </div>
       </div>
       <div className="info-strip">
         <SlidersHorizontal size={17} />
