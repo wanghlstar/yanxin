@@ -6,9 +6,10 @@ import {
   ShieldCheck,
   AlertCircle,
   Type,
+  HardDrive,
 } from "lucide-react";
 import { call, isDemo } from "@/lib/api";
-import type { ArchiveHealth, Preferences } from "@/lib/types";
+import type { ArchiveHealth, Preferences, TierInfo } from "@/lib/types";
 import { Switch } from "./ui/switch";
 import { Label } from "./ui/label";
 import { Card } from "./ui/card";
@@ -23,7 +24,9 @@ export function StorageTools() {
     }),
     [interval, setInterval] = useState(5),
     [ready, setReady] = useState(false),
-    [scale, setScale] = useState(1);
+    [scale, setScale] = useState(1),
+    [tier, setTier] = useState<TierInfo | null>(null),
+    [tierBusy, setTierBusy] = useState(false);
   const [desktop, setDesktop] = useState<{
     autoStart: boolean;
     autoStartAvailable: boolean;
@@ -44,6 +47,9 @@ export function StorageTools() {
         }
       })
       .catch((e) => toast.error(String(e)));
+    void call<TierInfo>("archive_tier_info")
+      .then(setTier)
+      .catch(() => setTier(null));
     void call<{ autoStart: boolean; autoStartAvailable: boolean }>(
       "desktop_settings",
     )
@@ -80,6 +86,65 @@ export function StorageTools() {
       toast.error(String(e));
     } finally {
       setSaving(false);
+    }
+  }
+  async function pickExternalDir() {
+    if (isDemo()) {
+      toast.error("演示模式不支持选择目录");
+      return;
+    }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: tier?.externalDir || undefined,
+        title: "选择外置存档目录",
+      });
+      if (!picked || typeof picked !== "string") return;
+      await call("save_archive_tier_settings", {
+        externalDir: picked,
+        retentionDays: tier?.retentionDays ?? 30,
+        indexEnabled: tier?.indexEnabled ?? true,
+      });
+      setTier(await call<TierInfo>("archive_tier_info"));
+      toast.success("外置存档目录已设置");
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
+  async function saveTier(patch: Partial<TierInfo>) {
+    setTierBusy(true);
+    try {
+      await call("save_archive_tier_settings", {
+        externalDir: patch.externalDir ?? tier?.externalDir ?? "",
+        retentionDays: patch.retentionDays ?? tier?.retentionDays ?? 30,
+        indexEnabled: patch.indexEnabled ?? tier?.indexEnabled ?? true,
+      });
+      setTier(await call<TierInfo>("archive_tier_info"));
+      toast.success("已保存");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setTierBusy(false);
+    }
+  }
+  async function runTierNow() {
+    setTierBusy(true);
+    try {
+      const report = await call<{ moved: number; errors: string[] }>(
+        "tier_archives_now",
+      );
+      setTier(await call<TierInfo>("archive_tier_info"));
+      toast.success(
+        report.errors.length
+          ? `归档完成，${report.errors.length} 个失败`
+          : `已归档 ${report.moved} 封`,
+      );
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setTierBusy(false);
     }
   }
   async function notifications(
@@ -255,6 +320,63 @@ export function StorageTools() {
           </Button>
         </div>
         <p>调整左侧栏文字大小，立即生效，无需重启。</p>
+      </Card>
+      <Card className="settings-tool">
+        <div className="settings-tool-title">
+          <HardDrive size={18} />
+          <h3>存档分层</h3>
+        </div>
+        <div className="settings-tool-row">
+          <span className="text-sm">
+            {tier?.externalDir
+              ? `外置存档：${tier.externalDir}`
+              : "未设置外置存档目录"}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void pickExternalDir()}
+          >
+            {tier?.externalDir ? "更改…" : "选择目录…"}
+          </Button>
+        </div>
+        <div className="settings-tool-row">
+          <SelectField
+            aria-label="本地保留天数"
+            value={tier?.retentionDays ?? 30}
+            disabled={tierBusy}
+            onValueChange={(v) => void saveTier({ retentionDays: Number(v) })}
+          >
+            {[7, 14, 30, 90].map((n) => (
+              <SelectOption key={n} value={n}>
+                保留 {n} 天
+              </SelectOption>
+            ))}
+            <SelectOption value={0}>永久保留本地</SelectOption>
+          </SelectField>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={tierBusy || !tier?.externalDir}
+            onClick={() => void runTierNow()}
+          >
+            {tierBusy ? "处理中…" : "立即归档"}
+          </Button>
+        </div>
+        <p>
+          超过保留天数的存档会自动移动到外置目录（随盘生成 index.html 索引，
+          任何机器用浏览器打开即可检索）。未带外置盘时：账户与近期邮件不受影响，
+          打开旧邮件会提示连接外置盘。
+          {tier && tier.pending > 0 && (
+            <>
+              {" "}
+              当前待归档 <strong>{tier.pending}</strong> 封。
+            </>
+          )}
+          {tier?.externalDir &&
+            !tier.externalReachable &&
+            "（外置盘当前未连接）"}
+        </p>
       </Card>
       <Card className="settings-tool">
         <div className="settings-tool-title">

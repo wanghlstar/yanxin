@@ -210,6 +210,14 @@ export interface Preferences {
   sendResultNotifications?: boolean;
   sidebarScale?: number;
 }
+export interface TierInfo {
+  externalDir: string;
+  retentionDays: number;
+  indexEnabled: boolean;
+  pending: number;
+  pendingBytes: number;
+  externalReachable: boolean;
+}
 export interface LocalArchiveFolder {
   name: string;
   displayName?: string;

@@ -280,6 +280,8 @@ export default function App() {
     threads: boolean;
   } | null>(null);
   const lastRowIndex = useRef(-1);
+  // 本地存档树的账号组展开状态（点"本地存档"可全部收起/展开）
+  const [archiveOpen, setArchiveOpen] = useState<Record<string, boolean>>({});
   useEffect(() => {
     void call<DataDirInfo>("data_dir_info")
       .then(setDataDir)
@@ -1338,35 +1340,82 @@ export default function App() {
                 <span>保存在这台 Mac</span>
                 <HardDrive size={13} />
               </div>
-              {nav("local", Archive, data.stats.saved)}
+              <Button
+                variant="ghost"
+                className={`nav-item ${
+                  page === "mail" &&
+                  query.view === "local" &&
+                  !query.accountId &&
+                  !query.folder
+                    ? "active"
+                    : ""
+                }`}
+                onClick={() => {
+                  navigate("local");
+                  // 全部展开则收起，否则全部展开
+                  const anyOpen = archiveTree.some(
+                    (g) => archiveOpen[g.accountId],
+                  );
+                  const next: Record<string, boolean> = {};
+                  archiveTree.forEach((g) => {
+                    next[g.accountId] = !anyOpen;
+                  });
+                  setArchiveOpen(next);
+                }}
+              >
+                <Archive size={17} />
+                <span>本地存档</span>
+                {!!data.stats.saved && <em>{data.stats.saved}</em>}
+              </Button>
               {archiveTree.map((group) => (
-                <Collapsible key={group.accountId} defaultOpen={false}>
+                <Collapsible
+                  key={group.accountId}
+                  open={!!archiveOpen[group.accountId]}
+                  onOpenChange={(open) =>
+                    setArchiveOpen((o) => ({ ...o, [group.accountId]: open }))
+                  }
+                >
                   <CollapsibleTrigger className="nav-item folder-item">
                     <MailIcon size={16} />
                     <span>{group.accountEmail || group.accountId}</span>
                     <ChevronDown size={14} />
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    {group.folders.map((f) => (
-                      <Button
-                        variant="ghost"
-                        key={f.name}
-                        className={`nav-item folder-item nested ${
-                          query.view === "local" &&
-                          query.accountId === group.accountId &&
-                          query.remoteFolder === f.name
-                            ? "active"
-                            : ""
-                        }`}
-                        onClick={() =>
-                          navigate("local", group.accountId, "", f.name)
-                        }
-                      >
-                        <Folder size={15} />
-                        <span>{f.displayName || f.name}</span>
-                        {!!f.count && <em>{f.count}</em>}
-                      </Button>
-                    ))}
+                    {[...group.folders]
+                      .sort(
+                        (a, b) =>
+                          // 与"我的账号"的服务器文件夹顺序一致
+                          serverFolders.findIndex(
+                            (x) =>
+                              x.accountId === group.accountId &&
+                              x.name === a.name,
+                          ) -
+                          serverFolders.findIndex(
+                            (x) =>
+                              x.accountId === group.accountId &&
+                              x.name === b.name,
+                          ),
+                      )
+                      .map((f) => (
+                        <Button
+                          variant="ghost"
+                          key={f.name}
+                          className={`nav-item folder-item nested ${
+                            query.view === "local" &&
+                            query.accountId === group.accountId &&
+                            query.remoteFolder === f.name
+                              ? "active"
+                              : ""
+                          }`}
+                          onClick={() =>
+                            navigate("local", group.accountId, "", f.name)
+                          }
+                        >
+                          <Folder size={15} />
+                          <span>{f.displayName || f.name}</span>
+                          {!!f.count && <em>{f.count}</em>}
+                        </Button>
+                      ))}
                   </CollapsibleContent>
                 </Collapsible>
               ))}

@@ -479,6 +479,27 @@ export async function call<T = void>(
         break;
       case "test_notification":
         break;
+      case "archive_tier_info":
+        result = {
+          externalDir: "",
+          retentionDays: 30,
+          indexEnabled: true,
+          pending: 0,
+          pendingBytes: 0,
+          externalReachable: false,
+        };
+        break;
+      case "save_archive_tier_settings":
+      case "tier_archives_now":
+        result = {
+          externalDir: String(args.externalDir ?? ""),
+          retentionDays: Number(args.retentionDays ?? 30),
+          indexEnabled: args.indexEnabled !== false,
+          pending: 0,
+          pendingBytes: 0,
+          externalReachable: false,
+        };
+        break;
       case "local_archive_tree":
         result = [
           {

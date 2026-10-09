@@ -137,6 +137,245 @@ impl Store {
     }
     // Write transactions use IMMEDIATE so the busy timeout applies before any
     // snapshot is read. DEFERRED read-to-write upgrades can fail with BUSY_SNAPSHOT.
+    /// 预览：当前有多少封/多少字节待搬迁，以及外置根是否可达。
+    pub fn tier_pending(&self) -> Result<(u64, u64, bool)> {
+        let prefs = self.preferences()?;
+        let ext = match prefs.external_archive_dir.filter(|p| !p.trim().is_empty()) {
+            Some(e) => PathBuf::from(e.trim()),
+            None => return Ok((0, 0, false)),
+        };
+        let reachable = ext.is_dir();
+        let days = prefs.archive_retention_days;
+        if days == 0 || !reachable {
+            return Ok((0, 0, reachable));
+        }
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+        let db = self.db()?;
+        let mut stmt = db
+            .prepare(
+                "SELECT COALESCE(json_extract(data,'$.relPath'),''), json_extract(data,'$.savedAt')
+                 FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1",
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(err)?;
+        let mut count = 0u64;
+        let mut bytes = 0u64;
+        for (rel, saved_at) in rows {
+            if rel.is_empty() || !self.root.join(&rel).exists() {
+                continue; // 已搬迁或在线邮件
+            }
+            let ok = chrono::DateTime::parse_from_rfc3339(&saved_at)
+                .map(|t| t.with_timezone(&chrono::Utc) < cutoff)
+                .unwrap_or(false);
+            if ok {
+                count += 1;
+                bytes += std::fs::metadata(self.root.join(&rel))
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+            }
+        }
+        Ok((count, bytes, reachable))
+    }
+    /// 分层归档：把超过保留天数的存档文件从内部根搬迁到外置存档根。
+    /// 跨设备用"复制+校验+删除"（rename 跨文件系统会失败）；外置根未配置时跳过。
+    pub fn tier_archives(&self) -> Result<TierReport> {
+        let prefs = self.preferences()?;
+        let mut report = TierReport::default();
+        let ext = match prefs.external_archive_dir.filter(|p| !p.trim().is_empty()) {
+            Some(e) => PathBuf::from(e.trim()),
+            None => {
+                report.skipped = true;
+                return Ok(report);
+            }
+        };
+        if ext == self.root {
+            report.skipped = true;
+            return Ok(report);
+        }
+        let days = prefs.archive_retention_days;
+        if days == 0 {
+            report.skipped = true; // 永久保留本地
+            return Ok(report);
+        }
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
+        let _archive = self.archive_gate.write().map_err(|e| e.to_string())?;
+        let db = self.db()?;
+        let mut stmt = db
+            .prepare(
+                "SELECT id, hash, COALESCE(json_extract(data,'$.relPath'),''), json_extract(data,'$.savedAt')
+                 FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1",
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                ))
+            })
+            .map_err(err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(err)?;
+        for (id, hash, rel, saved_at) in rows {
+            if rel.is_empty() {
+                continue;
+            }
+            let saved_at = match chrono::DateTime::parse_from_rfc3339(&saved_at) {
+                Ok(t) => t.with_timezone(&chrono::Utc),
+                Err(_) => continue, // 时间不可靠的不搬迁
+            };
+            if saved_at >= cutoff {
+                report.pending += 1;
+                continue;
+            }
+            let from = self.root.join(&rel);
+            if !from.exists() {
+                continue; // 已在外置根或在线邮件
+            }
+            let to = ext.join(&rel);
+            if to.exists() {
+                // 外置已有同内容文件：校验后删除本地副本
+                match std::fs::read(&to) {
+                    Ok(bytes) if archive::digest(&bytes) == hash => {
+                        let _ = std::fs::remove_file(&from);
+                        report.moved += 1;
+                    }
+                    _ => report.errors.push(format!(
+                        "{}：外置目标校验失败，保留本地",
+                        &id[..8.min(id.len())]
+                    )),
+                }
+                continue;
+            }
+            if let Some(parent) = to.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    report
+                        .errors
+                        .push(format!("{}：{e}", &id[..8.min(id.len())]));
+                    continue;
+                }
+            }
+            match std::fs::copy(&from, &to) {
+                Ok(_) => {
+                    let ok = std::fs::read(&to)
+                        .map(|b| archive::digest(&b) == hash)
+                        .unwrap_or(false);
+                    if ok {
+                        let _ = std::fs::remove_file(&from);
+                        report.moved += 1;
+                        report.moved_bytes += std::fs::metadata(&to).map(|m| m.len()).unwrap_or(0);
+                    } else {
+                        let _ = std::fs::remove_file(&to);
+                        report
+                            .errors
+                            .push(format!("{}：复制校验失败", &id[..8.min(id.len())]));
+                    }
+                }
+                Err(e) => report
+                    .errors
+                    .push(format!("{}：{e}", &id[..8.min(id.len())])),
+            }
+        }
+        if prefs.archive_index_enabled {
+            report.index_written = self.write_portable_index(&ext).is_ok();
+        }
+        Ok(report)
+    }
+    /// 在外置存档根生成随盘索引 index.html：按账号/文件夹分组，
+    /// 列出日期/发件人/主题并链接到对应 .eml（任何机器浏览器可读）。
+    pub fn write_portable_index(&self, ext: &Path) -> Result<usize> {
+        let db = self.db()?;
+        let mut stmt = db
+            .prepare(
+                "SELECT json_extract(data,'$.accountEmail'), json_extract(data,'$.relPath'),
+                        json_extract(data,'$.date'), json_extract(data,'$.sender'),
+                        json_extract(data,'$.subject')
+                 FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1",
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(err)?;
+        // 只收录物理上在外置根里的文件，保证链接可点
+        let mut groups: BTreeMap<String, BTreeMap<String, Vec<(String, String, String, String)>>> =
+            BTreeMap::new();
+        let mut total = 0usize;
+        for (account, rel, date, sender, subject) in rows {
+            if rel.is_empty() || !ext.join(&rel).exists() {
+                continue;
+            }
+            let folder = std::path::Path::new(&rel)
+                .parent()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            groups
+                .entry(account)
+                .or_default()
+                .entry(folder)
+                .or_default()
+                .push((date, sender, subject, rel));
+            total += 1;
+        }
+        let escape = |s: &str| {
+            s.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;")
+        };
+        let link = |rel: &str| {
+            rel.split('/')
+                .map(|part| {
+                    part.bytes().fold(String::new(), |mut acc, b| {
+                        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+                            acc.push(b as char);
+                        } else {
+                            acc.push_str(&format!("%{b:02X}"));
+                        }
+                        acc
+                    })
+                })
+                .collect::<Vec<_>>()
+                .join("/")
+        };
+        let mut html = String::from(
+            "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">             <title>雁信存档索引</title><style>             body{font-family:-apple-system,\"PingFang SC\",sans-serif;margin:24px;color:#1d1d1f}             h1{font-size:20px}h2{margin:20px 0 4px}h3{margin:12px 0 2px;color:#555;font-size:14px}             table{border-collapse:collapse;width:100%;margin-bottom:18px}             td{padding:5px 8px;border-bottom:1px solid #eee;font-size:13px}             a{color:#06c;text-decoration:none}td.d{color:#666;white-space:nowrap}             </style></head><body><h1>雁信存档索引</h1>",
+        );
+        for (account, folders) in &groups {
+            html.push_str(&format!("<h2>{}</h2>", escape(account)));
+            for (folder, mails) in folders {
+                html.push_str(&format!("<h3>{}</h3><table>", escape(folder)));
+                for (date, sender, subject, rel) in mails {
+                    html.push_str(&format!(
+                        "<tr><td class=\"d\">{}</td><td>{}</td><td><a href=\"{}\">{}</a></td></tr>",
+                        escape(&date.chars().take(10).collect::<String>()),
+                        escape(sender),
+                        link(rel),
+                        escape(subject),
+                    ));
+                }
+                html.push_str("</table>");
+            }
+        }
+        html.push_str("</body></html>");
+        std::fs::write(ext.join("index.html"), html).map_err(err)?;
+        Ok(total)
+    }
     /// MOVE 完成后把本地存档文件搬到新服务器文件夹名下，并更新 relPath。
     /// 在数据库提交之后调用：文件失败只记录日志——relPath 不变，读取始终指向
     /// 真实文件，磁盘布局滞后但不会读坏；成功则磁盘/界面/服务器三方一致。

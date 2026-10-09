@@ -997,6 +997,61 @@ pub(crate) fn normalize_data_dir(
     Ok(path)
 }
 
+/// 分层设置与预览（前端设置卡用）
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TierInfo {
+    external_dir: String,
+    retention_days: u32,
+    index_enabled: bool,
+    pending: u64,
+    pending_bytes: u64,
+    external_reachable: bool,
+}
+
+#[tauri::command]
+fn archive_tier_info(state: tauri::State<AppState>) -> std::result::Result<TierInfo, String> {
+    let p = state.store.preferences().map_err(|e| e.to_string())?;
+    let (pending, pending_bytes, reachable) =
+        state.store.tier_pending().map_err(|e| e.to_string())?;
+    Ok(TierInfo {
+        external_dir: p.external_archive_dir.unwrap_or_default(),
+        retention_days: p.archive_retention_days,
+        index_enabled: p.archive_index_enabled,
+        pending,
+        pending_bytes,
+        external_reachable: reachable,
+    })
+}
+
+#[tauri::command]
+fn save_archive_tier_settings(
+    state: tauri::State<AppState>,
+    external_dir: String,
+    retention_days: u32,
+    index_enabled: bool,
+) -> std::result::Result<TierInfo, String> {
+    let mut p = state.store.preferences().map_err(|e| e.to_string())?;
+    let dir = external_dir.trim().to_string();
+    p.external_archive_dir = if dir.is_empty() { None } else { Some(dir) };
+    p.archive_retention_days = retention_days;
+    p.archive_index_enabled = index_enabled;
+    state
+        .store
+        .save_preferences(&p)
+        .map_err(|e| e.to_string())?;
+    state
+        .store
+        .refresh_archive_roots()
+        .map_err(|e| e.to_string())?;
+    archive_tier_info(state)
+}
+
+#[tauri::command]
+fn tier_archives_now(state: tauri::State<AppState>) -> std::result::Result<TierReport, String> {
+    state.store.tier_archives().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn local_archive_tree(
     state: tauri::State<AppState>,
@@ -1347,6 +1402,12 @@ pub fn run() {
                 send_gate: send_gate.clone(),
                 realtime: realtime.clone(),
             });
+            // 分层归档：启动时检查一次，之后每 6 小时（未配置外置根或永久保留时自动跳过）
+            let tier_store = store.clone();
+            tauri::async_runtime::spawn_blocking(move || loop {
+                let _ = tier_store.tier_archives();
+                std::thread::sleep(std::time::Duration::from_secs(6 * 3600));
+            });
             realtime::start(store.clone(), app.handle().clone(), realtime);
             operations::start(store.clone(), app.handle().clone());
             directory_operations::start(store.clone(), app.handle().clone());
@@ -1496,6 +1557,9 @@ pub fn run() {
             restore_archive,
             open_data_folder,
             data_dir_info,
+            archive_tier_info,
+            save_archive_tier_settings,
+            tier_archives_now,
             local_archive_tree,
             set_data_dir,
             reset_data_dir,

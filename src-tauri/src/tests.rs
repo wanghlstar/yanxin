@@ -2432,3 +2432,49 @@ fn move_relocates_archive_file_and_rel_path() {
     s.relocate_archive_after_move("上线申请", &id);
     assert_eq!(s.mail(&id).unwrap().rel_path, Some(new_rel));
 }
+
+#[test]
+fn tier_archives_moves_old_files_and_writes_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let ext = tempfile::tempdir().unwrap();
+    let s = Store::new(dir.path().into()).unwrap();
+    let a = account();
+    s.save_account(&a).unwrap();
+    s.ingest(&a, "INBOX", "7:1", &raw(), false).unwrap();
+    s.ingest(&a, "INBOX", "7:2", &raw2(), false).unwrap();
+    // 配置外置根 + 30 天保留
+    let mut prefs = s.preferences().unwrap();
+    prefs.external_archive_dir = Some(ext.path().to_string_lossy().into_owned());
+    prefs.archive_retention_days = 30;
+    prefs.archive_index_enabled = true;
+    s.save_preferences(&prefs).unwrap();
+    s.refresh_archive_roots().unwrap();
+    // 把 raw() 那封的 savedAt 改到 60 天前
+    let raw_hash = archive::digest(&raw());
+    let mut old = s
+        .snapshot(&query())
+        .unwrap()
+        .messages
+        .into_iter()
+        .find(|m| m.hash == raw_hash)
+        .unwrap();
+    old.saved_at = (chrono::Utc::now() - chrono::Duration::days(60)).to_rfc3339();
+    let old_rel = old.rel_path.clone().unwrap();
+    s.update_mail(&old).unwrap();
+    // 待搬迁预览 = 1
+    let (pending, bytes, reachable) = s.tier_pending().unwrap();
+    assert_eq!((pending > 0, bytes > 0, reachable), (true, true, true));
+    // 执行分层
+    let report = s.tier_archives().unwrap();
+    assert_eq!(report.moved, 1);
+    assert!(report.errors.is_empty());
+    assert!(report.index_written);
+    // 旧文件已移到外置根，本地没有了；经外置根仍可读
+    assert!(!s.root.join(&old_rel).exists());
+    assert!(ext.path().join(&old_rel).exists());
+    assert_eq!(s.read_archive(Some(&old_rel), &old.hash).unwrap(), raw());
+    // index.html 已生成且包含账号
+    let index = std::fs::read_to_string(ext.path().join("index.html")).unwrap();
+    assert!(index.contains(&a.email));
+    assert!(index.contains("雁信存档索引"));
+}

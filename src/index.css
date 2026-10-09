@@ -232,8 +232,8 @@ kbd {
   align-items: center;
   gap: 9px;
   width: 100%;
-  padding: 7px 12px;
-  min-height: 32px;
+  padding: 6px 12px;
+  min-height: 30px;
   color: var(--foreground);
   text-align: left;
   border-radius: 7px;
@@ -286,7 +286,7 @@ button.nav-item {
   justify-content: space-between;
   color: var(--muted);
   font-size: 12px;
-  padding: 25px 12px 10px;
+  padding: 16px 12px 6px;
   letter-spacing: 0.8px;
 }
 .nav-section-heading button {
@@ -3196,6 +3196,21 @@ button.nav-item {
   text-overflow: ellipsis;
 }
 
+/* 折叠箭头随状态旋转（Radix 在 trigger 上设置 data-state） */
+.nav-item.folder-item[data-state] > svg:last-child {
+  transition: transform 0.15s;
+  opacity: 0.6;
+}
+.nav-item.folder-item[data-state="closed"] > svg:last-child {
+  transform: rotate(-90deg);
+}
+/* 存档树下文件夹缩进，层级分明 */
+.nav-item.folder-item.nested {
+  padding-left: 34px;
+}
+.nav-item.folder-item.nested > svg:first-child {
+  opacity: 0.7;
+}
 /* 邮件列表右键菜单 */
 .row-context-menu {
   position: fixed;
