@@ -998,6 +998,13 @@ pub(crate) fn normalize_data_dir(
 }
 
 #[tauri::command]
+fn local_archive_tree(
+    state: tauri::State<AppState>,
+) -> std::result::Result<Vec<models::LocalArchiveGroup>, String> {
+    state.store.local_archive_tree().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn data_dir_info(app: tauri::AppHandle) -> std::result::Result<DataDirInfo, String> {
     resolve_data_root_info(&app).map_err(|e| e.to_string())
 }
@@ -1489,6 +1496,7 @@ pub fn run() {
             restore_archive,
             open_data_folder,
             data_dir_info,
+            local_archive_tree,
             set_data_dir,
             reset_data_dir,
             check_data_dir,

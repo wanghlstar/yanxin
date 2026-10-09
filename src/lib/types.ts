@@ -208,6 +208,16 @@ export interface Preferences {
   syncIntervalMinutes: number;
   newMailNotifications?: boolean;
   sendResultNotifications?: boolean;
+  sidebarScale?: number;
+}
+export interface LocalArchiveFolder {
+  name: string;
+  count: number;
+}
+export interface LocalArchiveGroup {
+  accountId: string;
+  accountEmail: string;
+  folders: LocalArchiveFolder[];
 }
 export interface ArchiveHealth {
   checked: number;

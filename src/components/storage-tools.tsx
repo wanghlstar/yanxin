@@ -1,6 +1,12 @@
 import { SelectField, SelectOption } from "@/components/ui/select-field";
 import { useEffect, useState } from "react";
-import { Clock3, LoaderCircle, ShieldCheck, AlertCircle } from "lucide-react";
+import {
+  Clock3,
+  LoaderCircle,
+  ShieldCheck,
+  AlertCircle,
+  Type,
+} from "lucide-react";
 import { call, isDemo } from "@/lib/api";
 import type { ArchiveHealth, Preferences } from "@/lib/types";
 import { Switch } from "./ui/switch";
@@ -16,7 +22,8 @@ export function StorageTools() {
       sendResultNotifications: true,
     }),
     [interval, setInterval] = useState(5),
-    [ready, setReady] = useState(false);
+    [ready, setReady] = useState(false),
+    [scale, setScale] = useState(1);
   const [desktop, setDesktop] = useState<{
     autoStart: boolean;
     autoStartAvailable: boolean;
@@ -32,6 +39,7 @@ export function StorageTools() {
         if (live) {
           setPreferences(p);
           setInterval(p.syncIntervalMinutes);
+          setScale(p.sidebarScale ?? 1);
           setReady(true);
         }
       })
@@ -54,6 +62,20 @@ export function StorageTools() {
       await call("save_preferences", { preferences: p });
       setPreferences(p);
       toast.success("后台检查间隔已更新");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function saveScale() {
+    setSaving(true);
+    try {
+      const p = { ...preferences, sidebarScale: scale };
+      await call("save_preferences", { preferences: p });
+      setPreferences(p);
+      document.documentElement.style.setProperty("--nav-scale", String(scale));
+      toast.success("侧边栏字号已更新");
     } catch (e) {
       toast.error(String(e));
     } finally {
@@ -198,6 +220,41 @@ export function StorageTools() {
           IMAP 优先实时收取；此间隔用于定时补查和
           POP3。关闭窗口后继续运行，唤醒后补收。
         </p>
+      </Card>
+      <Card className="settings-tool">
+        <div className="settings-tool-title">
+          <Type size={18} />
+          <h3>侧边栏字号</h3>
+        </div>
+        <div className="settings-tool-row">
+          <SelectField
+            aria-label="侧边栏字号"
+            value={scale}
+            disabled={!ready || saving}
+            onValueChange={(value) => setScale(Number(value))}
+          >
+            {[
+              [0.9, "紧凑"],
+              [1, "标准"],
+              [1.15, "大"],
+            ].map(([value, label]) => (
+              <SelectOption key={String(value)} value={value as number}>
+                {label}
+              </SelectOption>
+            ))}
+          </SelectField>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={
+              !ready || saving || scale === (preferences.sidebarScale ?? 1)
+            }
+            onClick={() => void saveScale()}
+          >
+            {saving ? "保存中…" : "保存"}
+          </Button>
+        </div>
+        <p>调整左侧栏文字大小，立即生效，无需重启。</p>
       </Card>
       <Card className="settings-tool">
         <div className="settings-tool-title">

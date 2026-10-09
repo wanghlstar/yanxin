@@ -479,6 +479,18 @@ export async function call<T = void>(
         break;
       case "test_notification":
         break;
+      case "local_archive_tree":
+        result = [
+          {
+            accountId: "demo",
+            accountEmail: "demo@example.com",
+            folders: [
+              { name: "INBOX", count: 3 },
+              { name: "Sent", count: 1 },
+            ],
+          },
+        ];
+        break;
       case "check_data_dir":
         result = {
           path: String(args.path ?? ""),

@@ -341,6 +341,9 @@ pub(super) fn account() -> Account {
 pub(super) fn raw() -> Vec<u8> {
     b"From: Alice <alice@example.com>\r\nTo: test@example.com\r\nSubject: Project invoice\r\nDate: Tue, 29 Sep 2026 10:00:00 +0800\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=boundary123\r\n\r\n--boundary123\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nPlease keep this invoice.\r\n--boundary123\r\nContent-Type: application/octet-stream; name=invoice.txt\r\nContent-Disposition: attachment; filename=invoice.txt\r\nContent-Transfer-Encoding: base64\r\n\r\naW52b2ljZSBjb250ZW50\r\n--boundary123--\r\n".to_vec()
 }
+pub(super) fn raw2() -> Vec<u8> {
+    b"From: Bob <bob@example.com>\r\nTo: test@example.com\r\nSubject: Second invoice\r\nDate: Tue, 29 Sep 2026 11:00:00 +0800\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nAnother body.\r\n".to_vec()
+}
 pub(super) fn query() -> Query {
     Query {
         view: "local".into(),
@@ -2377,4 +2380,23 @@ fn data_dir_migration_copies_and_verifies_tree() {
     assert!(dst.join("mail.sqlite3").exists() == false);
     fs::write(dst.join("mail.sqlite3"), b"db").unwrap();
     assert!(dst.join("mail.sqlite3").exists());
+}
+
+#[test]
+fn local_archive_tree_groups_saved_mail_by_account_and_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::new(dir.path().into()).unwrap();
+    let a = account();
+    s.save_account(&a).unwrap();
+    s.ingest(&a, "INBOX", "7:1", &raw(), false).unwrap();
+    s.ingest(&a, "INBOX", "7:2", &raw2(), false).unwrap();
+    s.ingest(&a, "Sent", "7:3", &raw(), false).unwrap();
+    let tree = s.local_archive_tree().unwrap();
+    assert_eq!(tree.len(), 1);
+    assert_eq!(tree[0].account_email, a.email);
+    let folders: Vec<&str> = tree[0].folders.iter().map(|f| f.name.as_str()).collect();
+    assert!(folders.contains(&"INBOX"));
+    assert!(folders.contains(&"Sent"));
+    let inbox = tree[0].folders.iter().find(|f| f.name == "INBOX").unwrap();
+    assert_eq!(inbox.count, 2);
 }

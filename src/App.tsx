@@ -159,6 +159,8 @@ import type {
   RemoteFolder,
   DataDirInfo,
   DataDirCheck,
+  Preferences,
+  LocalArchiveGroup,
 } from "./lib/types";
 import { mailLink } from "./lib/mail-html";
 import { invoke } from "@tauri-apps/api/core";
@@ -269,11 +271,30 @@ export default function App() {
     if (data.remoteFolders) setServerFolders(data.remoteFolders);
   }, [data.remoteFolders]);
   const [dataDir, setDataDir] = useState<DataDirInfo | null>(null);
+  const [archiveTree, setArchiveTree] = useState<LocalArchiveGroup[]>([]);
   useEffect(() => {
     void call<DataDirInfo>("data_dir_info")
       .then(setDataDir)
       .catch(() => setDataDir(null));
   }, []);
+  // 侧边栏字号（偏好设置，应用到 CSS 变量）
+  useEffect(() => {
+    void call<Preferences>("get_preferences")
+      .then((p) => {
+        const scale = p.sidebarScale ?? 1;
+        document.documentElement.style.setProperty(
+          "--nav-scale",
+          String(scale),
+        );
+      })
+      .catch(() => {});
+  }, []);
+  // 本地存档树（按账号/服务器文件夹聚合）
+  useEffect(() => {
+    void call<LocalArchiveGroup[]>("local_archive_tree")
+      .then(setArchiveTree)
+      .catch(() => setArchiveTree([]));
+  }, [data.stats.saved]);
   useEffect(() => {
     if (!selected || page !== "mail") setReaderExpanded(false);
   }, [selected, page]);
@@ -1270,6 +1291,37 @@ export default function App() {
                 <HardDrive size={13} />
               </div>
               {nav("local", Archive, data.stats.saved)}
+              {archiveTree.map((group) => (
+                <Collapsible key={group.accountId} defaultOpen={false}>
+                  <CollapsibleTrigger className="nav-item folder-item">
+                    <MailIcon size={16} />
+                    <span>{group.accountEmail || group.accountId}</span>
+                    <ChevronDown size={14} />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    {group.folders.map((f) => (
+                      <Button
+                        variant="ghost"
+                        key={f.name}
+                        className={`nav-item folder-item nested ${
+                          query.view === "local" &&
+                          query.accountId === group.accountId &&
+                          query.remoteFolder === f.name
+                            ? "active"
+                            : ""
+                        }`}
+                        onClick={() =>
+                          navigate("local", group.accountId, "", f.name)
+                        }
+                      >
+                        <Folder size={15} />
+                        <span>{f.name}</span>
+                        {!!f.count && <em>{f.count}</em>}
+                      </Button>
+                    ))}
+                  </CollapsibleContent>
+                </Collapsible>
+              ))}
               {data.folders.map((f) => (
                 <Button
                   variant="ghost"

@@ -1,6 +1,7 @@
 use crate::{archive, models::*, rules};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::{
+    collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, RwLock},
@@ -107,6 +108,51 @@ impl Store {
     }
     // Write transactions use IMMEDIATE so the busy timeout applies before any
     // snapshot is read. DEFERRED read-to-write upgrades can fail with BUSY_SNAPSHOT.
+    /// 本地存档树：按账号与服务器文件夹聚合已完整存档的邮件数。
+    /// 分组口径与列表过滤一致（trusted_sources 的当前文件夹 + savedLocally）。
+    pub fn local_archive_tree(&self) -> Result<Vec<LocalArchiveGroup>> {
+        let db = self.db()?;
+        let mut stmt = db
+            .prepare(
+                "SELECT s.account_id, MAX(json_extract(m.data,'$.accountEmail')), s.folder, COUNT(DISTINCT s.mail_id)
+                 FROM trusted_sources s JOIN messages m ON m.id = s.mail_id
+                 WHERE s.active=1 AND COALESCE(json_extract(m.data,'$.savedLocally'),1)=1
+                 GROUP BY s.account_id, s.folder",
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    r.get::<_, String>(2)?,
+                    r.get::<_, u64>(3)?,
+                ))
+            })
+            .map_err(err)?;
+        let mut groups: BTreeMap<String, LocalArchiveGroup> = BTreeMap::new();
+        for row in rows {
+            let (account_id, email, folder, count) = row.map_err(err)?;
+            groups
+                .entry(account_id.clone())
+                .or_insert_with(|| LocalArchiveGroup {
+                    account_id,
+                    account_email: email,
+                    folders: Vec::new(),
+                })
+                .folders
+                .push(LocalArchiveFolder {
+                    name: folder,
+                    count,
+                });
+        }
+        let mut out: Vec<_> = groups.into_values().collect();
+        for g in &mut out {
+            g.folders
+                .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        }
+        Ok(out)
+    }
     /// 把当前数据库做一致快照到目标路径（迁移/备份共用）。
     pub fn vacuum_into(&self, destination: &Path) -> Result<()> {
         let _archive = self.archive_gate.read().map_err(err)?;

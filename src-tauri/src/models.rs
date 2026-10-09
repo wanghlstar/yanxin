@@ -302,6 +302,25 @@ pub struct Preferences {
     #[serde(default = "default_true")]
     pub send_result_notifications: bool,
     pub sync_interval_minutes: u32,
+    #[serde(default = "default_sidebar_scale")]
+    pub sidebar_scale: f64,
+}
+fn default_sidebar_scale() -> f64 {
+    1.0
+}
+/// 本地存档树的账号分组（按服务器文件夹聚合已存档邮件）
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalArchiveFolder {
+    pub name: String,
+    pub count: u64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalArchiveGroup {
+    pub account_id: String,
+    pub account_email: String,
+    pub folders: Vec<LocalArchiveFolder>,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -309,6 +328,7 @@ impl Default for Preferences {
             sync_interval_minutes: 5,
             new_mail_notifications: true,
             send_result_notifications: true,
+            sidebar_scale: 1.0,
         }
     }
 }
