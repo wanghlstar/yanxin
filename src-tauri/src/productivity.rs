@@ -57,9 +57,10 @@ impl Store {
         for row in q.query_map([], |r| r.get::<_, String>(0)).map_err(err)? {
             let mail: Mail = serde_json::from_str(&row.map_err(err)?).map_err(err)?;
             checked += 1;
-            match archive::read_raw(&self.root, &mail.hash).and_then(|raw| {
-                let parsed = mailparse::parse_mail(&raw).map_err(err)?;
-                let mut parts = Vec::new();
+            match archive::read_raw(&self.root, mail.rel_path.as_deref(), &mail.hash).and_then(
+                |raw| {
+                    let parsed = mailparse::parse_mail(&raw).map_err(err)?;
+                    let mut parts = Vec::new();
                 archive::leaves(&parsed, &mut parts);
                 for part in parts {
                     archive::decoded_bytes(part)?;
@@ -172,14 +173,20 @@ impl Store {
             let (id, status, data, error, updated_at, raw, scheduled_at) = row.map_err(err)?;
             let draft: Compose = serde_json::from_str(&data).map_err(err)?;
             let hash = archive::digest(&raw);
-            let exists: bool = db
+            let (exists, rel): (bool, String) = db
                 .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM messages WHERE account_id=?1 AND hash=?2)",
+                    "SELECT EXISTS(SELECT 1 FROM messages WHERE account_id=?1 AND hash=?2), COALESCE((SELECT json_extract(data,'$.relPath') FROM messages WHERE account_id=?1 AND hash=?2 LIMIT 1),'')",
                     params![draft.account_id, hash],
-                    |r| r.get(0),
+                    |r| Ok((r.get(0)?, r.get(1)?)),
                 )
                 .map_err(err)?;
-            let archived = exists && archive::read_raw(&self.root, &hash).is_ok();
+            let archived = exists
+                && archive::read_raw(
+                    &self.root,
+                    if rel.is_empty() { None } else { Some(rel.as_str()) },
+                    &hash,
+                )
+                .is_ok();
             let server_copy = self.sent_upload(&id)?;
             let server_copy_available = self
                 .account(&draft.account_id)

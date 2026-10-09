@@ -2738,7 +2738,10 @@ mod tests {
             .iter()
             .find(|m| m.subject == "Project invoice")
             .unwrap();
-        assert_eq!(archive::read_raw(d.path(), &old.hash).unwrap(), raw);
+        assert_eq!(
+            archive::read_raw(d.path(), old.rel_path.as_deref(), &old.hash).unwrap(),
+            raw
+        );
         assert_eq!(
             imap_round(&store, None, no_status, None, None).0.unwrap(),
             0
@@ -2819,7 +2822,10 @@ mod tests {
             .unwrap()
             .messages
             .remove(0);
-        assert_eq!(archive::read_raw(d.path(), &saved.hash).unwrap(), raw);
+        assert_eq!(
+            archive::read_raw(d.path(), saved.rel_path.as_deref(), &saved.hash).unwrap(),
+            raw
+        );
         let detail = store.detail(&saved.id).unwrap();
         assert_eq!(
             archive::attachment(&raw, detail.attachments[0].index).unwrap(),

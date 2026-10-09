@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::{
     fs::{self, File, OpenOptions},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
 };
 pub fn digest(raw: &[u8]) -> String {
     format!("{:x}", Sha256::digest(raw))
@@ -32,9 +32,66 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
     }
     result
 }
-pub fn store_raw(root: &Path, raw: &[u8]) -> Result<String> {
+
+// ---- 本地存档布局 ----
+// 新布局：<root>/archive/<账号>/<服务器文件夹(可按 / 分层)>/<hash>.eml
+// 旧布局：<root>/archive/<hash>.eml（升级前的数据与无账号/文件夹信息的场景，读取时回退）
+// 每个邮件在 data JSON 里记录 relPath；无 relPath 时按旧布局寻址。
+
+fn sanitize_component(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .map(|c| match c {
+            ':' | '\\' | '<' | '>' | '"' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    let trimmed = cleaned.trim().trim_matches('.').to_string();
+    if trimmed.is_empty() {
+        "_".to_string()
+    } else {
+        trimmed
+    }
+}
+
+/// 按账号与服务器文件夹生成相对路径；信息不足或路径过长时回退旧平面布局（None）。
+pub fn rel_path(account: &str, folder: &str, hash: &str) -> Option<String> {
+    if hash.len() != 64 || !hash.bytes().all(|x| x.is_ascii_hexdigit()) {
+        return None;
+    }
+    let account = account.trim();
+    let folder = folder.trim();
+    if account.is_empty() || folder.is_empty() {
+        return None;
+    }
+    let acc = sanitize_component(account);
+    let mut nested = PathBuf::new();
+    for part in folder.split('/') {
+        let part = sanitize_component(part);
+        if part.is_empty() {
+            return None;
+        }
+        nested.push(part);
+    }
+    let rel = Path::new("archive").join(acc).join(nested).join(format!("{hash}.eml"));
+    let text = rel.to_string_lossy().into_owned();
+    if text.len() > 400 {
+        return None; // 防止超长路径，回退平面布局
+    }
+    Some(text)
+}
+
+fn legacy_rel_path(hash: &str) -> String {
+    format!("archive/{hash}.eml")
+}
+
+/// 保存原始 MIME，返回相对路径（新布局或旧平面布局）。
+/// 目标路径已存在同内容文件时校验后复用；同内容落在不同账号/文件夹时各存一份（不再跨账号共享文件）。
+pub fn store_raw(root: &Path, account: &str, folder: &str, raw: &[u8]) -> Result<String> {
     let hash = digest(raw);
-    let path = root.join("archive").join(format!("{hash}.eml"));
+    let rel = rel_path(account, folder, &hash).unwrap_or_else(|| legacy_rel_path(&hash));
+    let path = root.join(&rel);
     if path.exists() {
         if digest(&fs::read(&path).map_err(err)?) != hash {
             return Err("已存档文件校验失败，请从备份恢复".into());
@@ -42,13 +99,19 @@ pub fn store_raw(root: &Path, raw: &[u8]) -> Result<String> {
     } else {
         atomic_write(&path, raw)?;
     }
-    Ok(hash)
+    Ok(rel)
 }
-pub fn read_raw(root: &Path, hash: &str) -> Result<Vec<u8>> {
+
+/// 读取原始 MIME 并校验内容哈希。rel_path 为空时按旧平面布局寻址。
+pub fn read_raw(root: &Path, rel_path: Option<&str>, hash: &str) -> Result<Vec<u8>> {
     if hash.len() != 64 || !hash.bytes().all(|x| x.is_ascii_hexdigit()) {
         return Err("无效存档标识".into());
     }
-    let raw = fs::read(root.join("archive").join(format!("{hash}.eml"))).map_err(err)?;
+    let path = match rel_path {
+        Some(r) if !r.is_empty() => root.join(r),
+        _ => root.join("archive").join(format!("{hash}.eml")),
+    };
+    let raw = fs::read(&path).map_err(err)?;
     if digest(&raw) != hash {
         return Err("存档内容校验失败".into());
     }
@@ -316,6 +379,7 @@ pub fn parse(
         trashed: false,
         has_attachments: !attachments.is_empty(),
         hash: digest(raw),
+        rel_path: None, // 由保存流程（store_raw）按账号/文件夹填充
         size: raw.len() as u64,
         saved_at: now,
         saved_locally: true,

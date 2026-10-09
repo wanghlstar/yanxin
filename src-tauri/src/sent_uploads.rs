@@ -537,16 +537,13 @@ pub(crate) mod tests {
         let u = s.sent_upload(&id).unwrap().unwrap();
         s.receipt_upload(&u, 9).unwrap();
         s.set_upload_server_id(&id, "<server@example.com>").unwrap();
+        // 发送副本经 ingest("Sent") 存档，路径为 archive/<账号>/Sent/<hash>.eml
+        let rel = archive::rel_path(&a.email, "Sent", &archive::digest(&raw)).unwrap();
         s.db()
             .unwrap()
             .execute_batch("DELETE FROM sources; DELETE FROM messages;")
             .unwrap();
-        std::fs::remove_file(
-            s.root
-                .join("archive")
-                .join(format!("{}.eml", archive::digest(&raw))),
-        )
-        .unwrap();
+        std::fs::remove_file(s.root.join(&rel)).unwrap();
         s.complete_upload(&s.sent_upload(&id).unwrap().unwrap())
             .unwrap();
         assert_eq!(s.sent_upload(&id).unwrap().unwrap().status, "completed");

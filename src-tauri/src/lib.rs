@@ -959,6 +959,43 @@ fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
     // Fullscreen is a separate macOS Space; preserve zoom/maximized only.
     StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED
 }
+/// 解析本地数据根目录（archive/ 存档与 mail.sqlite3 所在处）。
+/// 优先级：环境变量 YANXIN_DATA_DIR > 配置文件（~/.config/yanxin/data-dir 或 ~/.yanxin-data-dir，
+/// 取首行）> 默认 App 数据目录。支持 ~ 开头。
+/// 指向新目录后首次启动会按账号重新收取完整存档（凭据在系统钥匙串不受影响）；
+/// 想保留旧数据，先把旧目录整体复制到新位置再启动。
+fn resolve_data_root(app: &tauri::App) -> std::result::Result<std::path::PathBuf, tauri::Error> {
+    if let Ok(p) = std::env::var("YANXIN_DATA_DIR") {
+        let p = p.trim();
+        if !p.is_empty() {
+            return Ok(expand_tilde(app, p));
+        }
+    }
+    if let Ok(home) = app.path().home_dir() {
+        for f in [
+            home.join(".config/yanxin/data-dir"),
+            home.join(".yanxin-data-dir"),
+        ] {
+            if let Ok(s) = std::fs::read_to_string(&f) {
+                let s = s.lines().next().unwrap_or("").trim();
+                if !s.is_empty() {
+                    return Ok(expand_tilde(app, s));
+                }
+            }
+        }
+    }
+    app.path().app_data_dir()
+}
+
+fn expand_tilde(app: &tauri::App, p: &str) -> std::path::PathBuf {
+    if let Some(rest) = p.strip_prefix("~/") {
+        if let Ok(home) = app.path().home_dir() {
+            return home.join(rest);
+        }
+    }
+    std::path::PathBuf::from(p)
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(
@@ -1002,7 +1039,7 @@ pub fn run() {
                     let _ = window.hide();
                 }
             }
-            let store = Store::new(app.path().app_data_dir()?).map_err(std::io::Error::other)?;
+            let store = Store::new(resolve_data_root(&app)?).map_err(std::io::Error::other)?;
             let gate = Arc::new(Mutex::new(()));
             let send_gate = Arc::new(Mutex::new(()));
             let realtime = Arc::new(realtime::RealtimeControl::default());

@@ -344,7 +344,7 @@ impl Store {
         let current = self.mail(&mail.id)?;
         let mail = &current;
         if mail.saved_locally {
-            archive::read_raw(&self.root, &mail.hash)
+            archive::read_raw(&self.root, mail.rel_path.as_deref(), &mail.hash)
         } else {
             network::read_remote(self, &self.account(&mail.account_id)?, mail)
         }

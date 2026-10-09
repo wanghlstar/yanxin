@@ -45,7 +45,8 @@ mod tests {
             .is_err());
         assert!(store.account(&a.id).unwrap().save_locally);
         assert_eq!(store.archive_deletion_preview(&a.id).unwrap().count, 1);
-        assert!(archive::read_raw(&store.root, &archive::digest(&raw())).is_ok());
+        let rel = store.snapshot(&query()).unwrap().messages[0].rel_path.clone();
+        assert!(archive::read_raw(&store.root, rel.as_deref(), &archive::digest(&raw())).is_ok());
     }
     #[test]
     fn cleanup_keeps_online_identity_actions_and_blocks_stale_retention() {
@@ -65,17 +66,16 @@ mod tests {
         assert!(after.starred);
         assert!(store.source(&after.id).is_ok());
         assert_eq!(store.snapshot(&query()).unwrap().stats.saved, 0);
-        assert!(archive::read_raw(&store.root, &after.hash).is_err());
+        assert!(archive::read_raw(&store.root, after.rel_path.as_deref(), &after.hash).is_err());
         store.ingest(&a, "INBOX", "7:1", &raw(), false).unwrap();
         assert!(!store.mail(&before.id).unwrap().saved_locally);
-        assert!(!store
-            .root
-            .join("archive")
-            .join(format!("{}.eml", before.hash))
-            .exists());
+        let legacy = format!("archive/{}.eml", before.hash);
+        let gone = before.rel_path.as_deref().unwrap_or(&legacy);
+        assert!(!store.root.join(gone).exists());
     }
     #[test]
-    fn account_scope_preserves_shared_file_and_other_accounts_until_last_copy() {
+    fn account_scope_keeps_per_account_copies_independent() {
+        // 同一内容按账号/文件夹各存一份，删除一个账号不影响另一个账号的副本
         let (_temp, store, a) = seeded();
         let mut b = a.clone();
         b.id = "second".into();
@@ -83,15 +83,23 @@ mod tests {
         store.save_account(&b).unwrap();
         store.ingest(&b, "INBOX", "8:1", &raw(), false).unwrap();
         let hash = archive::digest(&raw());
+        let mail_b = store
+            .snapshot(&query())
+            .unwrap()
+            .messages
+            .into_iter()
+            .find(|m| m.account_id == b.id)
+            .unwrap();
+        let rel_b = mail_b.rel_path.clone().unwrap();
         assert_eq!(store.archive_deletion_preview("").unwrap().count, 2);
         let first = remove(&store, &a.id, true, 1).unwrap();
-        assert_eq!(first.freed_bytes, 0);
-        assert!(archive::read_raw(&store.root, &hash).is_ok());
+        assert!(first.freed_bytes > 0); // 自己的副本被删除，立即释放
+        assert!(archive::read_raw(&store.root, Some(&rel_b), &hash).is_ok()); // B 的副本不受影响
         assert!(store.account(&b.id).unwrap().save_locally);
         assert_eq!(store.archive_deletion_preview("").unwrap().count, 1);
         let second = remove(&store, &b.id, false, 1).unwrap();
         assert!(second.freed_bytes > 0);
-        assert!(archive::read_raw(&store.root, &hash).is_err());
+        assert!(archive::read_raw(&store.root, None, &hash).is_err());
         assert!(store.account(&b.id).unwrap().save_locally);
     }
     #[test]
@@ -112,11 +120,11 @@ mod tests {
     #[test]
     fn changed_count_and_database_failure_leave_archives_and_settings_intact() {
         let (_temp, store, a) = seeded();
-        let hash = archive::digest(&raw());
         assert!(remove(&store, &a.id, true, 2).is_err());
         store.db().unwrap().execute_batch("CREATE TRIGGER fail_cleanup BEFORE INSERT ON logs BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
         assert!(remove(&store, &a.id, true, 1).is_err());
-        assert!(archive::read_raw(&store.root, &hash).is_ok());
+        let mail = store.snapshot(&query()).unwrap().messages[0].clone();
+        assert!(archive::read_raw(&store.root, mail.rel_path.as_deref(), &mail.hash).is_ok());
         assert_eq!(store.archive_deletion_preview("").unwrap().count, 1);
         assert!(store.account(&a.id).unwrap().save_locally);
         assert!(!store.root.join(".archive-deletion").exists());
@@ -124,24 +132,20 @@ mod tests {
     #[test]
     fn interrupted_cleanup_restores_referenced_files_and_discards_committed_files() {
         let (_temp, store, _) = seeded();
-        let hash = archive::digest(&raw());
+        let mail = store.snapshot(&query()).unwrap().messages[0].clone();
+        let rel = mail.rel_path.clone().unwrap();
         let stage = store.root.join(".archive-deletion").join("interrupted");
-        fs::create_dir_all(&stage).unwrap();
-        fs::rename(
-            store.root.join("archive").join(format!("{hash}.eml")),
-            stage.join(format!("{hash}.eml")),
-        )
-        .unwrap();
+        fs::create_dir_all(stage.join(&rel).parent().unwrap()).unwrap();
+        fs::rename(store.root.join(&rel), stage.join(&rel)).unwrap();
+        // 未引用的暂存文件（新布局路径）应被丢弃
         let unused = archive::digest(b"unreferenced MIME");
-        fs::write(stage.join(format!("{unused}.eml")), b"unreferenced MIME").unwrap();
+        let unused_rel = format!("archive/other@example.com/INBOX/{unused}.eml");
+        fs::create_dir_all(stage.join(&unused_rel).parent().unwrap()).unwrap();
+        fs::write(stage.join(&unused_rel), b"unreferenced MIME").unwrap();
         let reopened = Store::new(store.root.clone()).unwrap();
-        assert!(archive::read_raw(&reopened.root, &hash).is_ok());
+        assert!(archive::read_raw(&reopened.root, Some(&rel), &mail.hash).is_ok());
         assert!(!stage.exists());
-        assert!(!reopened
-            .root
-            .join("archive")
-            .join(format!("{unused}.eml"))
-            .exists());
+        assert!(!reopened.root.join(&unused_rel).exists());
     }
 }
 #[derive(Serialize)]
@@ -265,9 +269,13 @@ impl Store {
             return Err("所选范围没有本地存档".into());
         }
         let mut offline_removed = 0;
-        let mut hashes = std::collections::BTreeSet::new();
+        let mut files: Vec<(String, String)> = Vec::new(); // (相对路径, hash)
         for (mail, online) in &mails {
-            hashes.insert(mail.hash.clone());
+            let rel = mail
+                .rel_path
+                .clone()
+                .unwrap_or_else(|| format!("archive/{}.eml", mail.hash));
+            files.push((rel, mail.hash.clone()));
             tx.execute("UPDATE archive_jobs SET status='cancelled',revision=revision+1,error='本地存档已清理' WHERE mail_id=?1",[&mail.id]).map_err(err)?;
             if *online {
                 tx.execute("UPDATE messages SET data=json_set(data,'$.savedLocally',json('false'),'$.body','') WHERE id=?1", [&mail.id]).map_err(err)?;
@@ -295,15 +303,23 @@ impl Store {
         fs::create_dir_all(&stage).map_err(err)?;
         let result = (|| -> Result<u64> {
             let mut bytes = 0;
-            for hash in hashes {
-                let used: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM messages WHERE hash=?1 AND COALESCE(json_extract(data,'$.savedLocally'),1)=1)", [&hash], |r| r.get(0)).map_err(err)?;
-                if used {
-                    continue;
-                } // Other accounts may share the same MIME file.
-                let from = self.root.join("archive").join(format!("{hash}.eml"));
+            for (rel, hash) in &files {
+                // 旧平面布局的文件可能被多个账号共享（同一 MIME 一份文件），仍需按 hash 检查引用；
+                // 新布局按账号/文件夹各存一份，文件与邮件记录一一对应，直接归此邮件所有。
+                if is_legacy_rel(rel) {
+                    let used: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM messages WHERE hash=?1 AND COALESCE(json_extract(data,'$.savedLocally'),1)=1)", [hash], |r| r.get(0)).map_err(err)?;
+                    if used {
+                        continue;
+                    }
+                }
+                let from = self.root.join(rel);
+                let to = stage.join(rel);
+                if let Some(parent) = to.parent() {
+                    fs::create_dir_all(parent).map_err(err)?;
+                }
                 match fs::symlink_metadata(&from) {
                     Ok(metadata) if metadata.is_file() => {
-                        fs::rename(&from, stage.join(format!("{hash}.eml"))).map_err(err)?;
+                        fs::rename(&from, &to).map_err(err)?;
                         bytes += metadata.len();
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -351,31 +367,97 @@ impl Store {
             if !entry.file_type().map_err(err)?.is_dir() {
                 return Err("存档清理暂存目录无效".into());
             }
-            for file in fs::read_dir(entry.path()).map_err(err)? {
-                let file = file.map_err(err)?;
-                let name = file.file_name().to_string_lossy().into_owned();
-                let hash = name
-                    .strip_suffix(".eml")
-                    .filter(|h| valid_hash(h))
-                    .ok_or("存档清理暂存文件无效")?;
-                if !file.file_type().map_err(err)?.is_file() {
-                    return Err("存档清理暂存文件类型无效".into());
+            let stage = entry.path();
+            // 暂存目录镜像存档相对路径：stage 内的相对路径即存档相对路径
+            let mut files = Vec::new();
+            collect_staged(&stage, &stage, &mut files)?;
+            for rel in files {
+                if !rel.ends_with(".eml") {
+                    return Err("存档清理暂存文件无效".into());
                 }
-                let used: bool = db.query_row("SELECT EXISTS(SELECT 1 FROM messages WHERE hash=?1 AND COALESCE(json_extract(data,'$.savedLocally'),1)=1)", [hash], |r| r.get(0)).map_err(err)?;
-                if used {
-                    let target = self.root.join("archive").join(Path::new(&name));
+                let referenced = if is_legacy_rel(&rel) {
+                    // 旧平面布局可能跨账号共享同一文件，按 hash 检查引用
+                    let hash = rel
+                        .rsplit('/')
+                        .next()
+                        .and_then(|n| n.strip_suffix(".eml"))
+                        .unwrap_or_default();
+                    db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM messages WHERE hash=?1 AND COALESCE(json_extract(data,'$.savedLocally'),1)=1)",
+                        [hash],
+                        |r| r.get(0),
+                    )
+                    .map_err(err)?
+                } else {
+                    // 新布局按账号/文件夹各存一份，按相对路径检查引用
+                    db.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM messages WHERE json_extract(data,'$.relPath')=?1 AND COALESCE(json_extract(data,'$.savedLocally'),1)=1)",
+                        [&rel],
+                        |r| r.get(0),
+                    )
+                    .map_err(err)?
+                };
+                let from = stage.join(&rel);
+                let target = self.root.join(&rel);
+                if referenced {
                     if !target.exists() {
-                        fs::rename(file.path(), target).map_err(err)?;
+                        if let Some(parent) = target.parent() {
+                            fs::create_dir_all(parent).map_err(err)?;
+                        }
+                        fs::rename(&from, &target).map_err(err)?;
                     } else {
-                        crate::archive::read_raw(&self.root, hash)?;
-                        fs::remove_file(file.path()).map_err(err)?;
+                        // 目标已存在：校验现有文件后丢弃暂存副本
+                        let hash = crate::archive::digest(&fs::read(&target).map_err(err)?);
+                        crate::archive::read_raw(&self.root, Some(&rel), &hash)?;
+                        fs::remove_file(&from).map_err(err)?;
                     }
                 } else {
-                    fs::remove_file(file.path()).map_err(err)?;
+                    fs::remove_file(&from).map_err(err)?;
                 }
             }
+            remove_empty_dirs(&stage)?;
             fs::remove_dir(entry.path()).map_err(err)?;
         }
         fs::remove_dir(staging).map_err(err)
     }
+}
+
+/// 旧平面布局：archive/<hash>.eml（恰好两级）。新布局至少三级。
+fn is_legacy_rel(rel: &str) -> bool {
+    let mut parts = rel.split('/');
+    let name = match (parts.next(), parts.next(), parts.next()) {
+        (Some("archive"), Some(name), None) => name,
+        _ => return false,
+    };
+    valid_hash(name.strip_suffix(".eml").unwrap_or(""))
+}
+
+fn collect_staged(root: &Path, dir: &Path, out: &mut Vec<String>) -> Result<()> {
+    for entry in fs::read_dir(dir).map_err(err)? {
+        let entry = entry.map_err(err)?;
+        let path = entry.path();
+        if entry.file_type().map_err(err)?.is_dir() {
+            collect_staged(root, &path, out)?;
+        } else {
+            let rel = path
+                .strip_prefix(root)
+                .map_err(err)?
+                .to_string_lossy()
+                .into_owned();
+            out.push(rel);
+        }
+    }
+    Ok(())
+}
+
+fn remove_empty_dirs(dir: &Path) -> Result<()> {
+    for entry in fs::read_dir(dir).map_err(err)? {
+        let entry = entry.map_err(err)?;
+        let path = entry.path();
+        if entry.file_type().map_err(err)?.is_dir() {
+            remove_empty_dirs(&path)?;
+            let _ = fs::remove_dir(&path);
+        }
+    }
+    Ok(())
 }

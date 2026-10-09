@@ -252,8 +252,14 @@ mod tests {
         );
         store.remove_account(&a.id).unwrap();
         assert!(store.retention_overrides(&a.id).unwrap().is_empty());
+        let rel = store
+            .snapshot(&crate::tests::query())
+            .unwrap()
+            .messages[0]
+            .rel_path
+            .clone();
         assert_eq!(
-            archive::read_raw(&store.root, &archive::digest(&raw())).unwrap(),
+            archive::read_raw(&store.root, rel.as_deref(), &archive::digest(&raw())).unwrap(),
             raw()
         );
     }

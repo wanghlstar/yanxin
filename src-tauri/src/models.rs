@@ -112,6 +112,9 @@ pub struct Mail {
     pub trashed: bool,
     pub has_attachments: bool,
     pub hash: String,
+    /// 本地存档相对路径（archive/<账号>/<文件夹>/<hash>.eml）；升级前数据为空，按旧平面布局寻址
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rel_path: Option<String>,
     pub size: u64,
     pub saved_at: String,
     #[serde(default = "default_true")]

@@ -407,7 +407,8 @@ mod tests {
         assert_eq!(s.server_operations().unwrap().blocked, 1);
         assert!(s.due_operations(&a.id).unwrap().is_empty());
         assert_eq!(
-            crate::archive::read_raw(&s.root, &s.mail(&id).unwrap().hash).unwrap(),
+            crate::archive::read_raw(&s.root, s.mail(&id).unwrap().rel_path.as_deref(), &s.mail(&id).unwrap().hash)
+                .unwrap(),
             raw()
         );
     }

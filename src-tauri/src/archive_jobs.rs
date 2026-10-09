@@ -293,7 +293,9 @@ impl Store {
                 );
             }
             mail.id = old.id.clone();
-            mail.hash = archive::store_raw(&self.root, raw)?;
+            mail.hash = hash.clone();
+            mail.rel_path =
+                Some(archive::store_raw(&self.root, &mail.account_email, &mail.source_folder, raw)?);
             mail.saved_locally = true;
             mail.is_read = old.is_read;
             mail.starred = old.starred;
@@ -317,7 +319,7 @@ impl Store {
             )
             .map_err(err)?;
         } else {
-            let existing = archive::read_raw(&self.root, &old.hash)?;
+            let existing = archive::read_raw(&self.root, old.rel_path.as_deref(), &old.hash)?;
             let end = existing
                 .windows(4)
                 .position(|w| w == b"\r\n\r\n")
@@ -658,7 +660,11 @@ mod tests {
         // A pre-existing full duplicate bound to another local record must not
         // silently erase a user's independent classification or journal history.
         let (mut duplicate, _, _) = archive::parse(&raw(), &saving, "Archive").unwrap();
-        duplicate.hash = archive::store_raw(&store.root, &raw()).unwrap();
+        duplicate.hash = archive::digest(&raw());
+        duplicate.rel_path = Some(
+            archive::store_raw(&store.root, &duplicate.account_email, &duplicate.source_folder, &raw())
+                .unwrap(),
+        );
         duplicate.local_folder = "另一归类".into();
         store
             .db()

@@ -369,11 +369,19 @@ impl Store {
             ))?;
         }
         let save = a.save_locally;
-        let hash = if save {
-            archive::store_raw(&self.root, raw)?
+        let hash = archive::digest(raw);
+        let rel_path = if save {
+            Some(archive::store_raw(
+                &self.root,
+                &mail.account_email,
+                &mail.source_folder,
+                raw,
+            )?)
         } else {
-            archive::digest(raw)
+            None
         }; // durable, complete MIME before DB success or rule execution
+        mail.hash = hash.clone();
+        mail.rel_path = rel_path;
         let mut db = self.db()?;
         let tx = db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -470,7 +478,7 @@ impl Store {
         remote_only: bool,
     ) -> Result<u32> {
         if m.saved_locally && !remote_only {
-            archive::read_raw(&self.root, &m.hash)?;
+            archive::read_raw(&self.root, m.rel_path.as_deref(), &m.hash)?;
         }
         let mut count = 0;
         for r in configured {
@@ -720,7 +728,7 @@ impl Store {
         })
     }
     fn reparse(&self, mail: &Mail) -> Result<(Mail, String, Vec<AttachmentInfo>)> {
-        let raw = archive::read_raw(&self.root, &mail.hash)?;
+        let raw = archive::read_raw(&self.root, mail.rel_path.as_deref(), &mail.hash)?;
         let fake = self.account_for_mail(mail);
         archive::parse(&raw, &fake, &mail.source_folder)
     }
@@ -833,13 +841,19 @@ impl Store {
         .map_err(err)?;
         let snap = Connection::open(folder.join("snapshot.sqlite3")).map_err(err)?;
         let mut stmt = snap
-            .prepare("SELECT DISTINCT hash FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1")
+            .prepare("SELECT DISTINCT hash, COALESCE(json_extract(data,'$.relPath'),'') FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1")
             .map_err(err)?;
-        for h in stmt.query_map([], |r| r.get::<_, String>(0)).map_err(err)? {
-            let hash = h.map_err(err)?;
+        for h in stmt
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })
+            .map_err(err)?
+        {
+            let (hash, rel) = h.map_err(err)?;
+            let rel = if rel.is_empty() { None } else { Some(rel.as_str()) };
             archive::atomic_write(
                 &folder.join("archive").join(format!("{hash}.eml")),
-                &archive::read_raw(&self.root, &hash)?,
+                &archive::read_raw(&self.root, rel, &hash)?,
             )?;
         }
         drop(stmt);
@@ -871,8 +885,10 @@ impl Store {
             if !m.saved_locally {
                 continue;
             }
-            let raw = archive::read_raw(folder, &m.hash)?;
-            archive::store_raw(&self.root, &raw)?;
+            let raw = archive::read_raw(folder, None, &m.hash)?;
+            let rel = archive::store_raw(&self.root, &m.account_email, &m.source_folder, &raw)?;
+            let mut m = m;
+            m.rel_path = Some(rel);
             if m.saved_locally {
                 messages.push(m);
             }
