@@ -518,7 +518,12 @@ impl Store {
             params![op.id, chrono::Utc::now().timestamp()],
         )
         .map_err(err)?;
-        tx.commit().map_err(err)
+        tx.commit().map_err(err)?;
+        // 提交后再搬本地存档文件：失败只记录日志，relPath 不变仍指向真实文件
+        if op.kind == "move" {
+            self.relocate_archive_after_move(&op.target, &op.mail_id);
+        }
+        Ok(())
     }
     pub(crate) fn fail_copy(&self, id: &str, reason: &str, definite_rejection: bool) -> Result<()> {
         // A saved receipt can be verified again with read-only commands. A

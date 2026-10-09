@@ -2400,3 +2400,30 @@ fn local_archive_tree_groups_saved_mail_by_account_and_folder() {
     let inbox = tree[0].folders.iter().find(|f| f.name == "INBOX").unwrap();
     assert_eq!(inbox.count, 2);
 }
+
+#[test]
+fn move_relocates_archive_file_and_rel_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::new(dir.path().into()).unwrap();
+    let a = account();
+    s.save_account(&a).unwrap();
+    s.ingest(&a, "INBOX", "7:1", &raw(), false).unwrap();
+    let id = s.snapshot(&query()).unwrap().messages[0].id.clone();
+    let before = s.mail(&id).unwrap();
+    let old_rel = before.rel_path.clone().unwrap();
+    assert!(old_rel.contains("INBOX"), "初始应在 INBOX 下: {old_rel}");
+    // 模拟 MOVE 完成后的搬迁
+    s.relocate_archive_after_move("上线申请", &id);
+    let after = s.mail(&id).unwrap();
+    let new_rel = after.rel_path.clone().unwrap();
+    assert!(new_rel.contains("上线申请"), "应在目标文件夹下: {new_rel}");
+    assert!(!s.root.join(&old_rel).exists(), "旧路径文件应已移走");
+    assert!(s.root.join(&new_rel).exists(), "新路径应有文件");
+    assert_eq!(
+        archive::read_raw(&s.root, Some(&new_rel), &after.hash).unwrap(),
+        raw()
+    );
+    // 再次搬到同一文件夹是幂等的
+    s.relocate_archive_after_move("上线申请", &id);
+    assert_eq!(s.mail(&id).unwrap().rel_path, Some(new_rel));
+}

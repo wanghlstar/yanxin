@@ -108,6 +108,70 @@ impl Store {
     }
     // Write transactions use IMMEDIATE so the busy timeout applies before any
     // snapshot is read. DEFERRED read-to-write upgrades can fail with BUSY_SNAPSHOT.
+    /// MOVE 完成后把本地存档文件搬到新服务器文件夹名下，并更新 relPath。
+    /// 在数据库提交之后调用：文件失败只记录日志——relPath 不变，读取始终指向
+    /// 真实文件，磁盘布局滞后但不会读坏；成功则磁盘/界面/服务器三方一致。
+    pub(crate) fn relocate_archive_after_move(&self, target_folder: &str, mail_id: &str) {
+        let _archive = match self.archive_gate.read() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        let db = match self.db() {
+            Ok(d) => d,
+            Err(_) => return,
+        };
+        let data: String =
+            match db.query_row("SELECT data FROM messages WHERE id=?1", [mail_id], |r| {
+                r.get(0)
+            }) {
+                Ok(d) => d,
+                Err(_) => return,
+            };
+        let mut mail: Mail = match serde_json::from_str(&data) {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        let new_rel = match archive::rel_path(&mail.account_email, target_folder, &mail.hash) {
+            Some(r) => r,
+            None => return, // 账号/文件夹信息不足，保持原路径
+        };
+        let old_rel = mail
+            .rel_path
+            .clone()
+            .unwrap_or_else(|| format!("archive/{}.eml", mail.hash));
+        if old_rel == new_rel {
+            return;
+        }
+        let from = self.root.join(&old_rel);
+        let to = self.root.join(&new_rel);
+        if !from.exists() {
+            return; // 没有本地文件（在线阅读邮件）
+        }
+        if to.exists() {
+            // 目标已有同内容文件（另一文件夹存过）：校验后移除源文件
+            match std::fs::read(&to) {
+                Ok(bytes) if archive::digest(&bytes) == mail.hash => {
+                    let _ = std::fs::remove_file(&from);
+                }
+                _ => return, // 目标不是同内容：保持原状
+            }
+        } else if let Err(e) = (|| -> std::result::Result<(), String> {
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            std::fs::rename(&from, &to).map_err(|e| e.to_string())
+        })() {
+            let _ = self.log(&format!(
+                "存档文件移动到「{target_folder}」失败（{}）：{e}",
+                &mail.hash.get(..8).unwrap_or("")
+            ));
+            return;
+        }
+        mail.rel_path = Some(new_rel);
+        if let Err(e) = self.update_mail(&mail) {
+            let _ = self.log("存档路径更新失败，文件已在新位置，请重启核对");
+        }
+    }
     /// 本地存档树：按账号与服务器文件夹聚合已完整存档的邮件数。
     /// 分组口径与列表过滤一致（trusted_sources 的当前文件夹 + savedLocally）。
     pub fn local_archive_tree(&self) -> Result<Vec<LocalArchiveGroup>> {
