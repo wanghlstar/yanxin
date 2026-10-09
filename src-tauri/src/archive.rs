@@ -38,6 +38,58 @@ pub fn atomic_write(path: &Path, data: &[u8]) -> Result<()> {
 // 旧布局：<root>/archive/<hash>.eml（升级前的数据与无账号/文件夹信息的场景，读取时回退）
 // 每个邮件在 data JSON 里记录 relPath；无 relPath 时按旧布局寻址。
 
+/// 解码 IMAP modified UTF-7 文件夹名（&bfFuL2XlaMA- → 深港日检），
+/// 使落盘目录使用真实名称；解码失败时原样返回。
+fn decode_utf7_modified(s: &str) -> String {
+    if !s.contains('&') {
+        return s.to_string();
+    }
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '&' {
+            if chars.peek() == Some(&'-') {
+                chars.next();
+                result.push('&');
+                continue;
+            }
+            let mut b64 = String::new();
+            while let Some(&nc) = chars.peek() {
+                if nc == '-' {
+                    chars.next();
+                    break;
+                }
+                b64.push(nc);
+                chars.next();
+            }
+            let b64 = b64.replace(',', "/");
+            let pad = 4 - b64.len() % 4;
+            let padded = if pad == 4 {
+                b64.clone()
+            } else {
+                format!("{}{}", b64, "=".repeat(pad))
+            };
+            if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(&padded) {
+                let units: Vec<u16> = bytes
+                    .chunks(2)
+                    .filter(|c| c.len() == 2)
+                    .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                    .collect();
+                if let Ok(decoded) = String::from_utf16(&units) {
+                    result.push_str(&decoded);
+                    continue;
+                }
+            }
+            result.push_str(&b64); // 解码失败原样保留
+        } else if c == ',' {
+            result.push('&');
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 fn sanitize_component(s: &str) -> String {
     let cleaned: String = s
         .chars()
@@ -67,7 +119,7 @@ pub fn rel_path(account: &str, folder: &str, hash: &str) -> Option<String> {
     }
     let acc = sanitize_component(account);
     let mut nested = PathBuf::new();
-    for part in folder.split('/') {
+    for part in decode_utf7_modified(folder).split('/') {
         let part = sanitize_component(part);
         if part.is_empty() {
             return None;

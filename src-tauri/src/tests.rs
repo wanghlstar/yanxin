@@ -2478,3 +2478,52 @@ fn tier_archives_moves_old_files_and_writes_index() {
     assert!(index.contains(&a.email));
     assert!(index.contains("雁信存档索引"));
 }
+
+#[test]
+fn normalize_renames_encoded_folder_to_chinese_and_recall_works() {
+    let dir = tempfile::tempdir().unwrap();
+    let ext = tempfile::tempdir().unwrap();
+    let s = Store::new(dir.path().into()).unwrap();
+    let a = account();
+    s.save_account(&a).unwrap();
+    // 用 encoded 文件夹名入库（模拟旧数据）
+    s.ingest(&a, "&bfFuL2XlaMA-", "7:1", &raw(), false).unwrap();
+    let id = s.snapshot(&query()).unwrap().messages[0].id.clone();
+    let decoded_rel = s.mail(&id).unwrap().rel_path.clone().unwrap();
+    assert!(
+        decoded_rel.contains("深港日检"),
+        "入库即应解码为中文: {decoded_rel}"
+    );
+    // 模拟旧数据：把文件搬回编码名路径并改写 relPath
+    let legacy_rel = decoded_rel.replace("深港日检", "&bfFuL2XlaMA-");
+    std::fs::create_dir_all(s.root.join(&legacy_rel).parent().unwrap()).unwrap();
+    std::fs::rename(s.root.join(&decoded_rel), s.root.join(&legacy_rel)).unwrap();
+    let mut legacy = s.mail(&id).unwrap();
+    legacy.rel_path = Some(legacy_rel.clone());
+    s.update_mail(&legacy).unwrap();
+    // 规范目录名
+    let moved = s.normalize_archive_paths().unwrap();
+    assert_eq!(moved, 1);
+    let new_rel = s.mail(&id).unwrap().rel_path.clone().unwrap();
+    assert!(new_rel.contains("深港日检"), "应解码为中文: {new_rel}");
+    assert!(!s.root.join(&legacy_rel).exists());
+    assert!(s.root.join(&new_rel).exists());
+    // 配置外置根并归档
+    let mut prefs = s.preferences().unwrap();
+    prefs.external_archive_dir = Some(ext.path().to_string_lossy().into_owned());
+    prefs.archive_retention_days = 7;
+    s.save_preferences(&prefs).unwrap();
+    s.refresh_archive_roots().unwrap();
+    let mut m = s.mail(&id).unwrap();
+    m.date = (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339();
+    s.update_mail(&m).unwrap();
+    assert_eq!(s.tier_archives().unwrap().moved, 1);
+    assert!(!s.root.join(&new_rel).exists());
+    // 取回本地
+    let recalled = s.tier_recall().unwrap();
+    assert_eq!(recalled, 1);
+    assert!(s.root.join(&new_rel).exists());
+    assert!(!ext.path().join(&new_rel).exists());
+    // 经内部根可读
+    assert_eq!(s.read_archive(Some(&new_rel), &m.hash).unwrap(), raw());
+}

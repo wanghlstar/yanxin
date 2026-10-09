@@ -1080,6 +1080,17 @@ fn save_archive_tier_settings(
 fn tier_archives_now(state: tauri::State<AppState>) -> std::result::Result<TierReport, String> {
     state.store.tier_archives().map_err(|e| e.to_string())
 }
+#[tauri::command]
+fn normalize_archive_paths(state: tauri::State<AppState>) -> std::result::Result<u64, String> {
+    state
+        .store
+        .normalize_archive_paths()
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+fn tier_recall(state: tauri::State<AppState>) -> std::result::Result<u64, String> {
+    state.store.tier_recall().map_err(|e| e.to_string())
+}
 
 #[tauri::command]
 fn local_archive_tree(
@@ -1591,6 +1602,8 @@ pub fn run() {
             archive_tier_info,
             save_archive_tier_settings,
             tier_archives_now,
+            normalize_archive_paths,
+            tier_recall,
             local_archive_tree,
             set_data_dir,
             reset_data_dir,

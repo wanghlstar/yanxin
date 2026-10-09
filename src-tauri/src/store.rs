@@ -198,6 +198,143 @@ impl Store {
         }
         Ok((count, bytes, reachable))
     }
+    /// 规范存档目录名：把旧版 encoded 文件夹名（&bfFuL2XlaMA-）重命名为解码后的
+    /// 真实名称（深港日检），逐文件搬迁并更新 relPath。幂等，可重复执行。
+    pub fn normalize_archive_paths(&self) -> Result<u64> {
+        let _archive = self.archive_gate.write().map_err(|e| e.to_string())?;
+        let db = self.db()?;
+        let mut stmt = db
+            .prepare(
+                "SELECT id, hash, json_extract(data,'$.accountEmail'),
+                        json_extract(data,'$.sourceFolder'), COALESCE(json_extract(data,'$.relPath'),'')
+                 FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1",
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, String>(4)?,
+                ))
+            })
+            .map_err(err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(err)?;
+        let mut moved = 0u64;
+        let roots = self
+            .archive_roots
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone();
+        for (id, hash, account, folder, old_rel) in rows {
+            if old_rel.is_empty() {
+                continue;
+            }
+            let new_rel = match archive::rel_path(&account, &folder, &hash) {
+                Some(r) => r,
+                None => continue,
+            };
+            if new_rel == old_rel {
+                continue;
+            }
+            // 找到现存文件所在根，搬到新相对路径
+            let mut done = false;
+            for root in &roots {
+                let from = root.join(&old_rel);
+                if !from.exists() {
+                    continue;
+                }
+                let to = root.join(&new_rel);
+                if to.exists() {
+                    let _ = std::fs::remove_file(&from); // 目标已存在同内容
+                } else if let Some(parent) = to.parent() {
+                    if std::fs::create_dir_all(parent).is_err() {
+                        continue;
+                    }
+                    if std::fs::rename(&from, &to).is_err() {
+                        continue;
+                    }
+                }
+                done = true;
+                break;
+            }
+            if done {
+                let mut mail: Mail = serde_json::from_str(
+                    &db.query_row("SELECT data FROM messages WHERE id=?1", [&id], |r| {
+                        r.get::<_, String>(0)
+                    })
+                    .map_err(err)?,
+                )
+                .map_err(err)?;
+                mail.rel_path = Some(new_rel);
+                db.execute(
+                    "UPDATE messages SET data=?2 WHERE id=?1",
+                    params![id, serde_json::to_string(&mail).map_err(err)?],
+                )
+                .map_err(err)?;
+                moved += 1;
+            }
+        }
+        Ok(moved)
+    }
+    /// 取回：把外置根的存档文件搬回内部根（外置盘不在时跳过）。
+    pub fn tier_recall(&self) -> Result<u64> {
+        let prefs = self.preferences()?;
+        let ext = match prefs.external_archive_dir.filter(|p| !p.trim().is_empty()) {
+            Some(e) => PathBuf::from(e.trim()),
+            None => return Ok(0),
+        };
+        if ext == self.root || !ext.is_dir() {
+            return Ok(0);
+        }
+        let _archive = self.archive_gate.write().map_err(|e| e.to_string())?;
+        let db = self.db()?;
+        let mut stmt = db
+            .prepare(
+                "SELECT hash, COALESCE(json_extract(data,'$.relPath'),'')
+                 FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1",
+            )
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            .map_err(err)?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(err)?;
+        let mut recalled = 0u64;
+        for (hash, rel) in rows {
+            if rel.is_empty() {
+                continue;
+            }
+            let from = ext.join(&rel);
+            let to = self.root.join(&rel);
+            if !from.exists() || to.exists() {
+                continue;
+            }
+            if let Some(parent) = to.parent() {
+                if std::fs::create_dir_all(parent).is_err() {
+                    continue;
+                }
+            }
+            match std::fs::copy(&from, &to) {
+                Ok(_) => {
+                    let ok = std::fs::read(&to)
+                        .map(|b| archive::digest(&b) == hash)
+                        .unwrap_or(false);
+                    if ok {
+                        let _ = std::fs::remove_file(&from);
+                        recalled += 1;
+                    } else {
+                        let _ = std::fs::remove_file(&to);
+                    }
+                }
+                Err(_) => continue,
+            }
+        }
+        Ok(recalled)
+    }
     /// 分层归档：把超过保留天数的存档文件从内部根搬迁到外置存档根。
     /// 跨设备用"复制+校验+删除"（rename 跨文件系统会失败）；外置根未配置时跳过。
     pub fn tier_archives(&self) -> Result<TierReport> {
@@ -370,7 +507,7 @@ impl Store {
                 .join("/")
         };
         let mut html = String::from(
-            "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">             <title>雁信存档索引</title><style>             body{font-family:-apple-system,\"PingFang SC\",sans-serif;margin:24px;color:#1d1d1f}             h1{font-size:20px}h2{margin:20px 0 4px}h3{margin:12px 0 2px;color:#555;font-size:14px}             table{border-collapse:collapse;width:100%;margin-bottom:18px}             td{padding:5px 8px;border-bottom:1px solid #eee;font-size:13px}             a{color:#06c;text-decoration:none}td.d{color:#666;white-space:nowrap}             </style></head><body><h1>雁信存档索引</h1>",
+            "<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">             <title>雁信存档索引</title><style>             body{font-family:-apple-system,\"PingFang SC\",sans-serif;margin:24px;color:#1d1d1f}             h1{font-size:20px}h2{margin:20px 0 4px}h3{margin:12px 0 2px;color:#555;font-size:14px}             table{border-collapse:collapse;width:100%;margin-bottom:18px}             td{padding:5px 8px;border-bottom:1px solid #eee;font-size:13px}             a{color:#06c;text-decoration:none}td.d{color:#666;white-space:nowrap}             </style></head><body><h1>雁信存档索引</h1><p>点击邮件将下载并用邮件客户端打开。</p>",
         );
         for (account, folders) in &groups {
             html.push_str(&format!("<h2>{}</h2>", escape(account)));
@@ -378,7 +515,7 @@ impl Store {
                 html.push_str(&format!("<h3>{}</h3><table>", escape(folder)));
                 for (date, sender, subject, rel) in mails {
                     html.push_str(&format!(
-                        "<tr><td class=\"d\">{}</td><td>{}</td><td><a href=\"{}\">{}</a></td></tr>",
+                        "<tr><td class=\"d\">{}</td><td>{}</td><td><a href=\"{}\" download>{}</a></td></tr>",
                         escape(&date.chars().take(10).collect::<String>()),
                         escape(sender),
                         link(rel),

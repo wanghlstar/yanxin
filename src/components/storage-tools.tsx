@@ -129,6 +129,30 @@ export function StorageTools() {
       setTierBusy(false);
     }
   }
+  async function normalizeNames() {
+    setTierBusy(true);
+    try {
+      const n = await call<number>("normalize_archive_paths");
+      setTier(await call<TierInfo>("archive_tier_info"));
+      toast.success(n ? `已规范 ${n} 封存档目录名` : "目录名均已是最新");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setTierBusy(false);
+    }
+  }
+  async function recallTier() {
+    setTierBusy(true);
+    try {
+      const n = await call<number>("tier_recall");
+      setTier(await call<TierInfo>("archive_tier_info"));
+      toast.success(n ? `已取回 ${n} 封到本地` : "没有需要取回的存档");
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setTierBusy(false);
+    }
+  }
   async function runTierNow() {
     setTierBusy(true);
     try {
@@ -361,6 +385,22 @@ export function StorageTools() {
             onClick={() => void runTierNow()}
           >
             {tierBusy ? "处理中…" : "立即归档"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={tierBusy || !tier?.externalDir}
+            onClick={() => void recallTier()}
+          >
+            取回本地
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={tierBusy}
+            onClick={() => void normalizeNames()}
+          >
+            规范目录名
           </Button>
         </div>
         <p>

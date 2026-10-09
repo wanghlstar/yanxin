@@ -489,6 +489,10 @@ export async function call<T = void>(
           externalReachable: false,
         };
         break;
+      case "normalize_archive_paths":
+      case "tier_recall":
+        result = 0;
+        break;
       case "save_archive_tier_settings":
       case "tier_archives_now":
         result = {
