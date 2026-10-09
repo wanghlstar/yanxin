@@ -397,7 +397,7 @@ fn server_and_account_removal_preserve_full_mime() {
     assert!(snapshot.accounts.is_empty());
     let m = &snapshot.messages[0];
     assert_eq!(
-        archive::read_raw(dir.path(), m.rel_path.as_deref(), &m.hash).unwrap(),
+        archive::read_raw(&[dir.path().into()], m.rel_path.as_deref(), &m.hash).unwrap(),
         raw()
     );
     let detail = store.detail(&m.id).unwrap();
@@ -463,7 +463,7 @@ fn backup_restore_is_complete_and_deduplicated() {
     assert_eq!(snap.messages[0].local_folder, "财务/发票");
     assert_eq!(
         archive::read_raw(
-            target.path(),
+            &[target.path().into()],
             snap.messages[0].rel_path.as_deref(),
             &snap.messages[0].hash
         )
@@ -674,7 +674,12 @@ fn metadata_upgrade_preserves_archive_identity_and_local_state() {
     );
     assert!(s.has_source(&account().id, "INBOX", "1:7").unwrap());
     assert_eq!(
-        archive::read_raw(dir.path(), original.rel_path.as_deref(), &original.hash).unwrap(),
+        archive::read_raw(
+            &[dir.path().into()],
+            original.rel_path.as_deref(),
+            &original.hash
+        )
+        .unwrap(),
         raw
     );
     s.update_mail(&original).unwrap(); // A completed migration must not run again.
@@ -985,7 +990,7 @@ fn editing_server_restarts_source_tracking_and_retains_original_archive() {
     assert!(s.account(&a.id).unwrap().enabled);
     let mail = &s.snapshot(&query()).unwrap().messages[0];
     assert_eq!(
-        archive::read_raw(dir.path(), mail.rel_path.as_deref(), &mail.hash).unwrap(),
+        archive::read_raw(&[dir.path().into()], mail.rel_path.as_deref(), &mail.hash).unwrap(),
         raw()
     );
     assert!(mail.is_read);
@@ -1357,7 +1362,7 @@ fn sent_duplicate_copies_share_local_actions_without_crossing_accounts_or_changi
     for data in rows {
         let m: Mail = serde_json::from_str(&data).unwrap();
         assert!(m.is_read && m.starred);
-        archive::read_raw(&store.root, m.rel_path.as_deref(), &m.hash).unwrap();
+        store.read_archive(m.rel_path.as_deref(), &m.hash).unwrap();
     }
     let mail = store
         .snapshot(&query())
@@ -1454,7 +1459,7 @@ fn online_mail_has_no_mime_archive_and_can_be_upgraded_without_losing_identity()
     let mail = store.mail(&s.messages[0].id).unwrap();
     assert!(!mail.saved_locally);
     assert!(mail.body.is_empty());
-    assert!(archive::read_raw(dir.path(), mail.rel_path.as_deref(), &mail.hash).is_err());
+    assert!(archive::read_raw(&[dir.path().into()], mail.rel_path.as_deref(), &mail.hash).is_err());
     assert_eq!(s.stats.saved, 0);
     assert_eq!(s.stats.bytes, 0);
     assert!(store.snapshot(&query()).unwrap().messages.is_empty());
@@ -1567,7 +1572,7 @@ fn absent_or_invalid_date_never_uses_download_time_and_server_date_repairs_old_m
     assert_eq!(store.mail(&id).unwrap().hash, hash);
     let rel = store.mail(&id).unwrap().rel_path;
     assert_eq!(
-        archive::read_raw(dir.path(), rel.as_deref(), &hash).unwrap(),
+        archive::read_raw(&[dir.path().into()], rel.as_deref(), &hash).unwrap(),
         raw
     );
     let traced=b"From: a@example.com\r\nDate: invalid\r\nReceived: from server; Mon, 29 Mar 2021 17:48:00 +0800\r\n\r\nHello";
@@ -1595,7 +1600,7 @@ fn malformed_base64_part_keeps_original_and_does_not_block_other_mail() {
     assert!(!detail.attachments[0].error.is_empty());
     assert_eq!(
         archive::read_raw(
-            &store.root,
+            &[store.root.clone()],
             detail.mail.rel_path.as_deref(),
             &detail.mail.hash
         )
@@ -2113,7 +2118,7 @@ fn server_flags_merge_atomically_without_replaying_or_losing_local_content() {
     assert_eq!(after.body, before.body);
     assert_eq!(after.local_folder, before.local_folder);
     assert_eq!(
-        archive::read_raw(&s.root, after.rel_path.as_deref(), &after.hash).unwrap(),
+        archive::read_raw(&[s.root.clone()], after.rel_path.as_deref(), &after.hash).unwrap(),
         raw()
     );
     assert_eq!(s.server_operations().unwrap().pending, 0);
@@ -2420,7 +2425,7 @@ fn move_relocates_archive_file_and_rel_path() {
     assert!(!s.root.join(&old_rel).exists(), "旧路径文件应已移走");
     assert!(s.root.join(&new_rel).exists(), "新路径应有文件");
     assert_eq!(
-        archive::read_raw(&s.root, Some(&new_rel), &after.hash).unwrap(),
+        archive::read_raw(&[s.root.clone()], Some(&new_rel), &after.hash).unwrap(),
         raw()
     );
     // 再次搬到同一文件夹是幂等的

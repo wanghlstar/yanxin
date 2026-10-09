@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { beforeEach, afterEach, describe, it, expect, vi } from "vitest";
 import App from "./App";
-import { enterDemo, leaveDemo, snapshot } from "./lib/api";
+import { call, enterDemo, leaveDemo, snapshot } from "./lib/api";
 import * as api from "./lib/api";
 import type { Query } from "./lib/types";
 import { toast } from "sonner";
@@ -118,6 +118,31 @@ beforeEach(async () => {
     root.render(<App />);
   });
 });
+it("applies the saved sidebar font scale to the CSS variable on mount", async () => {
+  await call("save_preferences", {
+    preferences: {
+      syncIntervalMinutes: 5,
+      newMailNotifications: true,
+      sendResultNotifications: true,
+      sidebarScale: 0.9,
+    },
+  });
+  // jsdom 不支持 CSS 自定义属性，用 spy 验证赋值调用本身
+  const setProperty = vi.spyOn(document.documentElement.style, "setProperty");
+  // beforeEach 已挂载过 App，挂载 effect 不会重跑；换新 root 重挂载以触发
+  await act(async () => root.unmount());
+  host.remove();
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => {
+    root.render(<App />);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  });
+  expect(setProperty).toHaveBeenCalledWith("--nav-scale", "0.9");
+  setProperty.mockRestore();
+});
+
 afterEach(async () => {
   await act(async () => toast.dismiss());
   // Sonner keeps its exit-animation timeout alive after an immediate unmount.

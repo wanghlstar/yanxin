@@ -105,20 +105,33 @@ pub fn store_raw(root: &Path, account: &str, folder: &str, raw: &[u8]) -> Result
     Ok(rel)
 }
 
-/// 读取原始 MIME 并校验内容哈希。rel_path 为空时按旧平面布局寻址。
-pub fn read_raw(root: &Path, rel_path: Option<&str>, hash: &str) -> Result<Vec<u8>> {
+/// 按根顺序读取原始 MIME 并校验内容哈希（内部根优先，其次外置存档根）。
+/// rel_path 为空时按旧平面布局寻址。所有根都没有时给出可操作的提示。
+pub fn read_raw(roots: &[PathBuf], rel_path: Option<&str>, hash: &str) -> Result<Vec<u8>> {
     if hash.len() != 64 || !hash.bytes().all(|x| x.is_ascii_hexdigit()) {
         return Err("无效存档标识".into());
     }
-    let path = match rel_path {
-        Some(r) if !r.is_empty() => root.join(r),
-        _ => root.join("archive").join(format!("{hash}.eml")),
+    let rel = match rel_path {
+        Some(r) if !r.is_empty() => r.to_string(),
+        _ => legacy_rel_path(hash),
     };
-    let raw = fs::read(&path).map_err(err)?;
-    if digest(&raw) != hash {
-        return Err("存档内容校验失败".into());
+    for root in roots {
+        let path = root.join(&rel);
+        if !path.exists() {
+            continue;
+        }
+        let raw = fs::read(&path).map_err(err)?;
+        if digest(&raw) != hash {
+            return Err("存档内容校验失败".into());
+        }
+        return Ok(raw);
     }
-    Ok(raw)
+    Err(if roots.len() > 1 {
+        "存档不在本地，可能已归档到外置存档：请连接外置盘后重试"
+    } else {
+        "存档文件不存在，请从备份恢复"
+    })
+    .map_err(Into::into)
 }
 pub fn leaves<'a>(part: &'a ParsedMail<'a>, out: &mut Vec<&'a ParsedMail<'a>>) {
     if part.subparts.is_empty() {

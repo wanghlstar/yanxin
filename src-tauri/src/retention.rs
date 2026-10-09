@@ -256,7 +256,9 @@ mod tests {
             .rel_path
             .clone();
         assert_eq!(
-            archive::read_raw(&store.root, rel.as_deref(), &archive::digest(&raw())).unwrap(),
+            store
+                .read_archive(rel.as_deref(), &archive::digest(&raw()))
+                .unwrap(),
             raw()
         );
     }

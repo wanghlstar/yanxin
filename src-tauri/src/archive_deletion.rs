@@ -48,7 +48,9 @@ mod tests {
         let rel = store.snapshot(&query()).unwrap().messages[0]
             .rel_path
             .clone();
-        assert!(archive::read_raw(&store.root, rel.as_deref(), &archive::digest(&raw())).is_ok());
+        assert!(store
+            .read_archive(rel.as_deref(), &archive::digest(&raw()))
+            .is_ok());
     }
     #[test]
     fn cleanup_keeps_online_identity_actions_and_blocks_stale_retention() {
@@ -68,7 +70,9 @@ mod tests {
         assert!(after.starred);
         assert!(store.source(&after.id).is_ok());
         assert_eq!(store.snapshot(&query()).unwrap().stats.saved, 0);
-        assert!(archive::read_raw(&store.root, after.rel_path.as_deref(), &after.hash).is_err());
+        assert!(store
+            .read_archive(after.rel_path.as_deref(), &after.hash)
+            .is_err());
         store.ingest(&a, "INBOX", "7:1", &raw(), false).unwrap();
         assert!(!store.mail(&before.id).unwrap().saved_locally);
         let legacy = format!("archive/{}.eml", before.hash);
@@ -96,12 +100,12 @@ mod tests {
         assert_eq!(store.archive_deletion_preview("").unwrap().count, 2);
         let first = remove(&store, &a.id, true, 1).unwrap();
         assert!(first.freed_bytes > 0); // 自己的副本被删除，立即释放
-        assert!(archive::read_raw(&store.root, Some(&rel_b), &hash).is_ok()); // B 的副本不受影响
+        assert!(store.read_archive(Some(&rel_b), &hash).is_ok()); // B 的副本不受影响
         assert!(store.account(&b.id).unwrap().save_locally);
         assert_eq!(store.archive_deletion_preview("").unwrap().count, 1);
         let second = remove(&store, &b.id, false, 1).unwrap();
         assert!(second.freed_bytes > 0);
-        assert!(archive::read_raw(&store.root, None, &hash).is_err());
+        assert!(store.read_archive(None, &hash).is_err());
         assert!(store.account(&b.id).unwrap().save_locally);
     }
     #[test]
@@ -126,7 +130,9 @@ mod tests {
         store.db().unwrap().execute_batch("CREATE TRIGGER fail_cleanup BEFORE INSERT ON logs BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
         assert!(remove(&store, &a.id, true, 1).is_err());
         let mail = store.snapshot(&query()).unwrap().messages[0].clone();
-        assert!(archive::read_raw(&store.root, mail.rel_path.as_deref(), &mail.hash).is_ok());
+        assert!(store
+            .read_archive(mail.rel_path.as_deref(), &mail.hash)
+            .is_ok());
         assert_eq!(store.archive_deletion_preview("").unwrap().count, 1);
         assert!(store.account(&a.id).unwrap().save_locally);
         assert!(!store.root.join(".archive-deletion").exists());
@@ -145,7 +151,7 @@ mod tests {
         fs::create_dir_all(stage.join(&unused_rel).parent().unwrap()).unwrap();
         fs::write(stage.join(&unused_rel), b"unreferenced MIME").unwrap();
         let reopened = Store::new(store.root.clone()).unwrap();
-        assert!(archive::read_raw(&reopened.root, Some(&rel), &mail.hash).is_ok());
+        assert!(reopened.read_archive(Some(&rel), &mail.hash).is_ok());
         assert!(!stage.exists());
         assert!(!reopened.root.join(&unused_rel).exists());
     }
@@ -410,7 +416,7 @@ impl Store {
                     } else {
                         // 目标已存在：校验现有文件后丢弃暂存副本
                         let hash = crate::archive::digest(&fs::read(&target).map_err(err)?);
-                        crate::archive::read_raw(&self.root, Some(&rel), &hash)?;
+                        self.read_archive(Some(&rel), &hash)?;
                         fs::remove_file(&from).map_err(err)?;
                     }
                 } else {

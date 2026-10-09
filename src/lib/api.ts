@@ -485,8 +485,8 @@ export async function call<T = void>(
             accountId: "demo",
             accountEmail: "demo@example.com",
             folders: [
-              { name: "INBOX", count: 3 },
-              { name: "Sent", count: 1 },
+              { name: "INBOX", displayName: "收件箱", count: 3 },
+              { name: "Sent", displayName: "已发送", count: 1 },
             ],
           },
         ];

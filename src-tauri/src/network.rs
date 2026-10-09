@@ -2739,7 +2739,7 @@ mod tests {
             .find(|m| m.subject == "Project invoice")
             .unwrap();
         assert_eq!(
-            archive::read_raw(d.path(), old.rel_path.as_deref(), &old.hash).unwrap(),
+            archive::read_raw(&[d.path().into()], old.rel_path.as_deref(), &old.hash).unwrap(),
             raw
         );
         assert_eq!(
@@ -2823,7 +2823,7 @@ mod tests {
             .messages
             .remove(0);
         assert_eq!(
-            archive::read_raw(d.path(), saved.rel_path.as_deref(), &saved.hash).unwrap(),
+            archive::read_raw(&[d.path().into()], saved.rel_path.as_deref(), &saved.hash).unwrap(),
             raw
         );
         let detail = store.detail(&saved.id).unwrap();

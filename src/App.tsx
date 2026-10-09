@@ -272,6 +272,14 @@ export default function App() {
   }, [data.remoteFolders]);
   const [dataDir, setDataDir] = useState<DataDirInfo | null>(null);
   const [archiveTree, setArchiveTree] = useState<LocalArchiveGroup[]>([]);
+  // 邮件列表右键菜单与 Shift 范围选择锚点
+  const [rowMenu, setRowMenu] = useState<{
+    x: number;
+    y: number;
+    ids: string[];
+    threads: boolean;
+  } | null>(null);
+  const lastRowIndex = useRef(-1);
   useEffect(() => {
     void call<DataDirInfo>("data_dir_info")
       .then(setDataDir)
@@ -289,6 +297,19 @@ export default function App() {
       })
       .catch(() => {});
   }, []);
+  useEffect(() => {
+    if (!rowMenu) return;
+    const close = () => setRowMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [rowMenu]);
   // 本地存档树（按账号/服务器文件夹聚合）
   useEffect(() => {
     void call<LocalArchiveGroup[]>("local_archive_tree")
@@ -555,6 +576,23 @@ export default function App() {
       if ((e.metaKey || e.ctrlKey) && e.key === "n") {
         e.preventDefault();
         compose();
+      }
+      if ((e.metaKey || e.ctrlKey) && (e.key === "a" || e.key === "A")) {
+        // 全选当前列表（输入框/对话框内不拦截）
+        const target = e.target instanceof Element ? e.target : null;
+        if (
+          page !== "mail" ||
+          draft ||
+          target?.closest(
+            'input, textarea, [contenteditable="true"], [role="combobox"]',
+          ) ||
+          document.querySelector(
+            '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]',
+          )
+        )
+          return;
+        e.preventDefault();
+        setChecked(data.messages.map((m) => m.id));
       }
     };
     window.addEventListener("keydown", handler);
@@ -1197,7 +1235,16 @@ export default function App() {
                       <Button
                         variant="ghost"
                         className="nav-item account-item"
-                        onClick={() => navigate("all", a.id)}
+                        onClick={() => {
+                          // 点击账号名即折叠/展开（与右侧箭头一致）
+                          const open = !expandedAccounts.includes(a.id);
+                          setExpandedAccounts((ids) =>
+                            open
+                              ? [...ids, a.id]
+                              : ids.filter((id) => id !== a.id),
+                          );
+                          if (open) void loadFolders(a.id);
+                        }}
                       >
                         <span className={`account-dot color-${i % 4}`} />
                         <span>
@@ -1246,12 +1293,13 @@ export default function App() {
                       </CollapsibleTrigger>
                     </div>
                     <CollapsibleContent className="remote-folder-list">
-                      {folderLoading.includes(a.id) && (
-                        <div role="status" aria-label="正在加载服务器文件夹">
-                          <Skeleton className="h-6 mb-2" />
-                          <Skeleton className="h-6" />
-                        </div>
-                      )}
+                      {folderLoading.includes(a.id) &&
+                        !serverFolders.some((f) => f.accountId === a.id) && (
+                          <div role="status" aria-label="正在加载服务器文件夹">
+                            <Skeleton className="h-6 mb-2" />
+                            <Skeleton className="h-6" />
+                          </div>
+                        )}
                       {folderErrors[a.id] && (
                         <Button
                           variant="ghost"
@@ -1315,7 +1363,7 @@ export default function App() {
                         }
                       >
                         <Folder size={15} />
-                        <span>{f.name}</span>
+                        <span>{f.displayName || f.name}</span>
                         {!!f.count && <em>{f.count}</em>}
                       </Button>
                     ))}
@@ -1998,32 +2046,142 @@ export default function App() {
                       </Button>
                     </div>
                   )}
+                  {rowMenu && (
+                    <div
+                      className="row-context-menu"
+                      style={{ left: rowMenu.x, top: rowMenu.y }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void mutate(
+                            rowMenu.ids,
+                            "read",
+                            "true",
+                            rowMenu.threads,
+                          );
+                          setRowMenu(null);
+                        }}
+                      >
+                        标记为已读
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void mutate(
+                            rowMenu.ids,
+                            "read",
+                            "false",
+                            rowMenu.threads,
+                          );
+                          setRowMenu(null);
+                        }}
+                      >
+                        标记为未读
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void queueArchives(rowMenu.ids, rowMenu.threads);
+                          setRowMenu(null);
+                        }}
+                      >
+                        完整保存到本地
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setMoveIds(rowMenu.ids);
+                          setMoveThreads(rowMenu.threads);
+                          setMoveFolder("");
+                          setRowMenu(null);
+                        }}
+                      >
+                        归入本地文件夹
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void mutate(
+                            rowMenu.ids,
+                            "trash",
+                            query.view === "trash" ? "false" : "true",
+                            rowMenu.threads,
+                          );
+                          setRowMenu(null);
+                        }}
+                      >
+                        {query.view === "trash"
+                          ? "从废纸篓恢复"
+                          : "移到本地废纸篓"}
+                      </button>
+                    </div>
+                  )}
                   <div className="mail-rows">
                     {loading ? (
                       <MailListSkeleton />
                     ) : data.messages.length ? (
-                      data.messages.map((m) => (
+                      data.messages.map((m, rowIndex) => (
                         <div
                           key={m.id}
                           className={`mail-row ${selected === m.id || (grouped && !!m.conversationId && m.conversationId === detail?.mail.conversationId) ? "selected" : ""} ${!m.isRead ? "unread" : ""}`}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            const keep =
+                              checked.includes(m.id) && checked.length > 1;
+                            if (!keep) setChecked([m.id]);
+                            setRowMenu({
+                              x: event.clientX,
+                              y: event.clientY,
+                              ids: keep ? checked : [m.id],
+                              threads: grouped,
+                            });
+                          }}
                         >
                           <div className="row-check">
                             <Checkbox
                               aria-label={`选择 ${m.subject}`}
                               checked={checked.includes(m.id)}
-                              onCheckedChange={(v) =>
+                              onCheckedChange={(v) => {
+                                lastRowIndex.current = rowIndex;
                                 setChecked((ids) =>
                                   v
                                     ? [...ids, m.id]
                                     : ids.filter((id) => id !== m.id),
-                                )
-                              }
+                                );
+                              }}
                             />
                           </div>
                           <Button
                             variant="ghost"
                             className="mail-row-main"
-                            onClick={() => void openMail(m)}
+                            onClick={(event) => {
+                              // Shift+点击：从上次行到本行范围勾选
+                              if (
+                                event.shiftKey &&
+                                lastRowIndex.current >= 0 &&
+                                lastRowIndex.current !== rowIndex
+                              ) {
+                                const from = Math.min(
+                                  lastRowIndex.current,
+                                  rowIndex,
+                                );
+                                const to = Math.max(
+                                  lastRowIndex.current,
+                                  rowIndex,
+                                );
+                                const range = data.messages
+                                  .slice(from, to + 1)
+                                  .map((item) => item.id);
+                                setChecked((ids) =>
+                                  Array.from(new Set([...ids, ...range])),
+                                );
+                                return;
+                              }
+                              lastRowIndex.current = rowIndex;
+                              void openMail(m);
+                            }}
                           >
                             <div className="row-top">
                               <span className="sender-name">

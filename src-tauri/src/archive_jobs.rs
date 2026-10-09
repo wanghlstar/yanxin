@@ -323,7 +323,7 @@ impl Store {
             )
             .map_err(err)?;
         } else {
-            let existing = archive::read_raw(&self.root, old.rel_path.as_deref(), &old.hash)?;
+            let existing = self.read_archive(old.rel_path.as_deref(), &old.hash)?;
             let end = existing
                 .windows(4)
                 .position(|w| w == b"\r\n\r\n")

@@ -57,8 +57,9 @@ impl Store {
         for row in q.query_map([], |r| r.get::<_, String>(0)).map_err(err)? {
             let mail: Mail = serde_json::from_str(&row.map_err(err)?).map_err(err)?;
             checked += 1;
-            match archive::read_raw(&self.root, mail.rel_path.as_deref(), &mail.hash).and_then(
-                |raw| {
+            match self
+                .read_archive(mail.rel_path.as_deref(), &mail.hash)
+                .and_then(|raw| {
                     let parsed = mailparse::parse_mail(&raw).map_err(err)?;
                     let mut parts = Vec::new();
                     archive::leaves(&parsed, &mut parts);
@@ -66,8 +67,7 @@ impl Store {
                         archive::decoded_bytes(part)?;
                     }
                     Ok(())
-                },
-            ) {
+                }) {
                 Ok(()) => healthy += 1,
                 Err(error) => problems.push(ArchiveProblem {
                     mail_id: mail.id,
@@ -182,16 +182,16 @@ impl Store {
                 )
                 .map_err(err)?;
             let archived = exists
-                && archive::read_raw(
-                    &self.root,
-                    if rel.is_empty() {
-                        None
-                    } else {
-                        Some(rel.as_str())
-                    },
-                    &hash,
-                )
-                .is_ok();
+                && self
+                    .read_archive(
+                        if rel.is_empty() {
+                            None
+                        } else {
+                            Some(rel.as_str())
+                        },
+                        &hash,
+                    )
+                    .is_ok();
             let server_copy = self.sent_upload(&id)?;
             let server_copy_available = self
                 .account(&draft.account_id)

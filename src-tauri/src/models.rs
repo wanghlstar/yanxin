@@ -304,15 +304,41 @@ pub struct Preferences {
     pub sync_interval_minutes: u32,
     #[serde(default = "default_sidebar_scale")]
     pub sidebar_scale: f64,
+    /// 外置存档根目录（冷库）；为空表示不分层
+    #[serde(default)]
+    pub external_archive_dir: Option<String>,
+    /// 本地保留天数；0 = 永久（不分层）
+    #[serde(default = "default_retention_days")]
+    pub archive_retention_days: u32,
+    /// 分层时是否随盘生成 index.html 索引
+    #[serde(default = "default_true")]
+    pub archive_index_enabled: bool,
+}
+fn default_retention_days() -> u32 {
+    30
 }
 fn default_sidebar_scale() -> f64 {
     1.0
+}
+/// 分层归档结果
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TierReport {
+    pub moved: u64,
+    pub moved_bytes: u64,
+    pub pending: u64,
+    pub pending_bytes: u64,
+    pub index_written: bool,
+    pub skipped: bool,
+    pub errors: Vec<String>,
 }
 /// 本地存档树的账号分组（按服务器文件夹聚合已存档邮件）
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalArchiveFolder {
     pub name: String,
+    #[serde(default)]
+    pub display_name: String,
     pub count: u64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -329,6 +355,9 @@ impl Default for Preferences {
             new_mail_notifications: true,
             send_result_notifications: true,
             sidebar_scale: 1.0,
+            external_archive_dir: None,
+            archive_retention_days: 30,
+            archive_index_enabled: true,
         }
     }
 }

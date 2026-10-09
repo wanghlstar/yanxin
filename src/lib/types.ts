@@ -212,6 +212,7 @@ export interface Preferences {
 }
 export interface LocalArchiveFolder {
   name: string;
+  displayName?: string;
   count: number;
 }
 export interface LocalArchiveGroup {

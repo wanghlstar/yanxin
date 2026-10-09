@@ -408,7 +408,7 @@ mod tests {
         assert!(s.due_operations(&a.id).unwrap().is_empty());
         assert_eq!(
             crate::archive::read_raw(
-                &s.root,
+                &[s.root.clone()],
                 s.mail(&id).unwrap().rel_path.as_deref(),
                 &s.mail(&id).unwrap().hash
             )

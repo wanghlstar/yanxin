@@ -9,6 +9,8 @@ use std::{
 #[derive(Clone)]
 pub struct Store {
     pub root: PathBuf,
+    /// 存档读取根顺序：内部根优先，其后是外置存档根（冷库）
+    pub archive_roots: std::sync::Arc<std::sync::RwLock<Vec<PathBuf>>>,
     pub(crate) archive_gate: Arc<RwLock<()>>,
     pub(crate) conversation_cache: Arc<Mutex<Option<(i64, Arc<crate::conversation::Index>)>>>,
 }
@@ -17,6 +19,7 @@ impl Store {
         fs::create_dir_all(&root).map_err(err)?;
         let s = Self {
             root,
+            archive_roots: Arc::new(RwLock::new(Vec::new())),
             archive_gate: Arc::new(RwLock::new(())),
             conversation_cache: Arc::new(Mutex::new(None)),
         };
@@ -103,8 +106,34 @@ impl Store {
         crate::archive_jobs::initialize(&db)?;
         s.migrate_folder_roles()?;
         s.recover_archive_deletion()?;
+        s.refresh_archive_roots()?; // 必须先于元数据刷新：读取存档依赖根列表
         s.refresh_archive_metadata()?;
         Ok(s)
+    }
+    /// 按当前偏好重算存档读取根：内部根优先，其后是外置存档根。
+    pub fn refresh_archive_roots(&self) -> Result<()> {
+        let mut roots = vec![self.root.clone()];
+        if let Some(ext) = self
+            .preferences()?
+            .external_archive_dir
+            .filter(|p| !p.trim().is_empty())
+        {
+            let ext = PathBuf::from(ext.trim());
+            if ext != self.root {
+                roots.push(ext);
+            }
+        }
+        *self.archive_roots.write().map_err(|e| e.to_string())? = roots;
+        Ok(())
+    }
+    /// 按根顺序读取存档（内部优先、外置兜底）
+    pub fn read_archive(&self, rel_path: Option<&str>, hash: &str) -> Result<Vec<u8>> {
+        let roots = self
+            .archive_roots
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone();
+        archive::read_raw(&roots, rel_path, hash)
     }
     // Write transactions use IMMEDIATE so the busy timeout applies before any
     // snapshot is read. DEFERRED read-to-write upgrades can fail with BUSY_SNAPSHOT.
@@ -178,8 +207,10 @@ impl Store {
         let db = self.db()?;
         let mut stmt = db
             .prepare(
-                "SELECT s.account_id, MAX(json_extract(m.data,'$.accountEmail')), s.folder, COUNT(DISTINCT s.mail_id)
+                "SELECT s.account_id, MAX(json_extract(m.data,'$.accountEmail')), s.folder,
+                        MAX(COALESCE(json_extract(rf.data,'$.displayName'),'')), COUNT(DISTINCT s.mail_id)
                  FROM trusted_sources s JOIN messages m ON m.id = s.mail_id
+                 LEFT JOIN remote_folders rf ON rf.account_id = s.account_id AND rf.name = s.folder
                  WHERE s.active=1 AND COALESCE(json_extract(m.data,'$.savedLocally'),1)=1
                  GROUP BY s.account_id, s.folder",
             )
@@ -190,13 +221,14 @@ impl Store {
                     r.get::<_, String>(0)?,
                     r.get::<_, Option<String>>(1)?.unwrap_or_default(),
                     r.get::<_, String>(2)?,
-                    r.get::<_, u64>(3)?,
+                    r.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    r.get::<_, u64>(4)?,
                 ))
             })
             .map_err(err)?;
         let mut groups: BTreeMap<String, LocalArchiveGroup> = BTreeMap::new();
         for row in rows {
-            let (account_id, email, folder, count) = row.map_err(err)?;
+            let (account_id, email, folder, display_name, count) = row.map_err(err)?;
             groups
                 .entry(account_id.clone())
                 .or_insert_with(|| LocalArchiveGroup {
@@ -207,6 +239,7 @@ impl Store {
                 .folders
                 .push(LocalArchiveFolder {
                     name: folder,
+                    display_name,
                     count,
                 });
         }
@@ -599,7 +632,7 @@ impl Store {
         remote_only: bool,
     ) -> Result<u32> {
         if m.saved_locally && !remote_only {
-            archive::read_raw(&self.root, m.rel_path.as_deref(), &m.hash)?;
+            self.read_archive(m.rel_path.as_deref(), &m.hash)?;
         }
         let mut count = 0;
         for r in configured {
@@ -849,7 +882,7 @@ impl Store {
         })
     }
     fn reparse(&self, mail: &Mail) -> Result<(Mail, String, Vec<AttachmentInfo>)> {
-        let raw = archive::read_raw(&self.root, mail.rel_path.as_deref(), &mail.hash)?;
+        let raw = self.read_archive(mail.rel_path.as_deref(), &mail.hash)?;
         let fake = self.account_for_mail(mail);
         archive::parse(&raw, &fake, &mail.source_folder)
     }
@@ -976,7 +1009,7 @@ impl Store {
             };
             archive::atomic_write(
                 &folder.join("archive").join(format!("{hash}.eml")),
-                &archive::read_raw(&self.root, rel, &hash)?,
+                &self.read_archive(rel, &hash)?,
             )?;
         }
         drop(stmt);
@@ -1008,7 +1041,7 @@ impl Store {
             if !m.saved_locally {
                 continue;
             }
-            let raw = archive::read_raw(folder, None, &m.hash)?;
+            let raw = archive::read_raw(&[folder.to_path_buf()], None, &m.hash)?;
             let rel = archive::store_raw(&self.root, &m.account_email, &m.source_folder, &raw)?;
             let mut m = m;
             m.rel_path = Some(rel);
