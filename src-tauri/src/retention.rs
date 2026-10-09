@@ -252,10 +252,7 @@ mod tests {
         );
         store.remove_account(&a.id).unwrap();
         assert!(store.retention_overrides(&a.id).unwrap().is_empty());
-        let rel = store
-            .snapshot(&crate::tests::query())
-            .unwrap()
-            .messages[0]
+        let rel = store.snapshot(&crate::tests::query()).unwrap().messages[0]
             .rel_path
             .clone();
         assert_eq!(

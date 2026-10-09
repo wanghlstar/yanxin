@@ -45,7 +45,9 @@ mod tests {
             .is_err());
         assert!(store.account(&a.id).unwrap().save_locally);
         assert_eq!(store.archive_deletion_preview(&a.id).unwrap().count, 1);
-        let rel = store.snapshot(&query()).unwrap().messages[0].rel_path.clone();
+        let rel = store.snapshot(&query()).unwrap().messages[0]
+            .rel_path
+            .clone();
         assert!(archive::read_raw(&store.root, rel.as_deref(), &archive::digest(&raw())).is_ok());
     }
     #[test]

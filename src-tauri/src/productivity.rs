@@ -61,12 +61,13 @@ impl Store {
                 |raw| {
                     let parsed = mailparse::parse_mail(&raw).map_err(err)?;
                     let mut parts = Vec::new();
-                archive::leaves(&parsed, &mut parts);
-                for part in parts {
-                    archive::decoded_bytes(part)?;
-                }
-                Ok(())
-            }) {
+                    archive::leaves(&parsed, &mut parts);
+                    for part in parts {
+                        archive::decoded_bytes(part)?;
+                    }
+                    Ok(())
+                },
+            ) {
                 Ok(()) => healthy += 1,
                 Err(error) => problems.push(ArchiveProblem {
                     mail_id: mail.id,
@@ -183,7 +184,11 @@ impl Store {
             let archived = exists
                 && archive::read_raw(
                     &self.root,
-                    if rel.is_empty() { None } else { Some(rel.as_str()) },
+                    if rel.is_empty() {
+                        None
+                    } else {
+                        Some(rel.as_str())
+                    },
                     &hash,
                 )
                 .is_ok();

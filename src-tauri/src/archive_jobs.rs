@@ -294,8 +294,12 @@ impl Store {
             }
             mail.id = old.id.clone();
             mail.hash = hash.clone();
-            mail.rel_path =
-                Some(archive::store_raw(&self.root, &mail.account_email, &mail.source_folder, raw)?);
+            mail.rel_path = Some(archive::store_raw(
+                &self.root,
+                &mail.account_email,
+                &mail.source_folder,
+                raw,
+            )?);
             mail.saved_locally = true;
             mail.is_read = old.is_read;
             mail.starred = old.starred;
@@ -662,8 +666,13 @@ mod tests {
         let (mut duplicate, _, _) = archive::parse(&raw(), &saving, "Archive").unwrap();
         duplicate.hash = archive::digest(&raw());
         duplicate.rel_path = Some(
-            archive::store_raw(&store.root, &duplicate.account_email, &duplicate.source_folder, &raw())
-                .unwrap(),
+            archive::store_raw(
+                &store.root,
+                &duplicate.account_email,
+                &duplicate.source_folder,
+                &raw(),
+            )
+            .unwrap(),
         );
         duplicate.local_folder = "另一归类".into();
         store

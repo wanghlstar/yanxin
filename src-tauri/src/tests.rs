@@ -393,7 +393,10 @@ fn server_and_account_removal_preserve_full_mime() {
     assert_eq!(snapshot.messages.len(), 1);
     assert!(snapshot.accounts.is_empty());
     let m = &snapshot.messages[0];
-    assert_eq!(archive::read_raw(dir.path(), m.rel_path.as_deref(), &m.hash).unwrap(), raw());
+    assert_eq!(
+        archive::read_raw(dir.path(), m.rel_path.as_deref(), &m.hash).unwrap(),
+        raw()
+    );
     let detail = store.detail(&m.id).unwrap();
     assert_eq!(detail.attachments[0].name, "invoice.txt");
     assert_eq!(
@@ -667,7 +670,10 @@ fn metadata_upgrade_preserves_archive_identity_and_local_state() {
         serde_json::to_value(expected).unwrap()
     );
     assert!(s.has_source(&account().id, "INBOX", "1:7").unwrap());
-    assert_eq!(archive::read_raw(dir.path(), original.rel_path.as_deref(), &original.hash).unwrap(), raw);
+    assert_eq!(
+        archive::read_raw(dir.path(), original.rel_path.as_deref(), &original.hash).unwrap(),
+        raw
+    );
     s.update_mail(&original).unwrap(); // A completed migration must not run again.
     drop(s);
     let s = Store::new(dir.path().into()).unwrap();
@@ -975,7 +981,10 @@ fn editing_server_restarts_source_tracking_and_retains_original_archive() {
     assert!(!s.has_source(&a.id, "INBOX", "123:7").unwrap());
     assert!(s.account(&a.id).unwrap().enabled);
     let mail = &s.snapshot(&query()).unwrap().messages[0];
-    assert_eq!(archive::read_raw(dir.path(), mail.rel_path.as_deref(), &mail.hash).unwrap(), raw());
+    assert_eq!(
+        archive::read_raw(dir.path(), mail.rel_path.as_deref(), &mail.hash).unwrap(),
+        raw()
+    );
     assert!(mail.is_read);
     a.email = "different@example.com".into();
     assert!(s.edit_account(&a).is_err());
@@ -1084,7 +1093,11 @@ fn uncertain_send_is_preserved_and_never_automatically_retried_after_restart() {
     assert!(s.outbox().unwrap()[0].archived);
     assert_eq!(s.snapshot(&query()).unwrap().matched, 1);
     let saved = s.snapshot(&query()).unwrap().messages[0].clone();
-    std::fs::write(dir.path().join(saved.rel_path.as_deref().unwrap()), b"corrupt").unwrap();
+    std::fs::write(
+        dir.path().join(saved.rel_path.as_deref().unwrap()),
+        b"corrupt",
+    )
+    .unwrap();
     assert!(!s.outbox().unwrap()[0].archived);
 }
 
@@ -1578,8 +1591,12 @@ fn malformed_base64_part_keeps_original_and_does_not_block_other_mail() {
     assert!(!detail.mail.parse_warnings.is_empty());
     assert!(!detail.attachments[0].error.is_empty());
     assert_eq!(
-        archive::read_raw(&store.root, detail.mail.rel_path.as_deref(), &detail.mail.hash)
-                .unwrap(),
+        archive::read_raw(
+            &store.root,
+            detail.mail.rel_path.as_deref(),
+            &detail.mail.hash
+        )
+        .unwrap(),
         raw
     );
     assert!(archive::attachment(raw, detail.attachments[0].index).is_err());
@@ -2092,7 +2109,10 @@ fn server_flags_merge_atomically_without_replaying_or_losing_local_content() {
     assert_eq!(after.hash, before.hash);
     assert_eq!(after.body, before.body);
     assert_eq!(after.local_folder, before.local_folder);
-    assert_eq!(archive::read_raw(&s.root, after.rel_path.as_deref(), &after.hash).unwrap(), raw());
+    assert_eq!(
+        archive::read_raw(&s.root, after.rel_path.as_deref(), &after.hash).unwrap(),
+        raw()
+    );
     assert_eq!(s.server_operations().unwrap().pending, 0);
     assert_eq!(s.cached_flag_uids(&a, "INBOX", 7).unwrap().len(), 1);
     assert!(s.cached_flag_uids(&a, "INBOX", 8).unwrap().is_empty());

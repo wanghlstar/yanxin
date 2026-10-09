@@ -74,7 +74,10 @@ pub fn rel_path(account: &str, folder: &str, hash: &str) -> Option<String> {
         }
         nested.push(part);
     }
-    let rel = Path::new("archive").join(acc).join(nested).join(format!("{hash}.eml"));
+    let rel = Path::new("archive")
+        .join(acc)
+        .join(nested)
+        .join(format!("{hash}.eml"));
     let text = rel.to_string_lossy().into_owned();
     if text.len() > 400 {
         return None; // 防止超长路径，回退平面布局

@@ -844,13 +844,15 @@ impl Store {
             .prepare("SELECT DISTINCT hash, COALESCE(json_extract(data,'$.relPath'),'') FROM messages WHERE COALESCE(json_extract(data,'$.savedLocally'),1)=1")
             .map_err(err)?;
         for h in stmt
-            .query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-            })
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
             .map_err(err)?
         {
             let (hash, rel) = h.map_err(err)?;
-            let rel = if rel.is_empty() { None } else { Some(rel.as_str()) };
+            let rel = if rel.is_empty() {
+                None
+            } else {
+                Some(rel.as_str())
+            };
             archive::atomic_write(
                 &folder.join("archive").join(format!("{hash}.eml")),
                 &archive::read_raw(&self.root, rel, &hash)?,
