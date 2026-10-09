@@ -2052,8 +2052,10 @@ export default function App() {
                       style={{ left: rowMenu.x, top: rowMenu.y }}
                       onMouseDown={(e) => e.stopPropagation()}
                     >
-                      <button
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start"
                         onClick={() => {
                           void mutate(
                             rowMenu.ids,
@@ -2065,9 +2067,11 @@ export default function App() {
                         }}
                       >
                         标记为已读
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start"
                         onClick={() => {
                           void mutate(
                             rowMenu.ids,
@@ -2079,18 +2083,22 @@ export default function App() {
                         }}
                       >
                         标记为未读
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start"
                         onClick={() => {
                           void queueArchives(rowMenu.ids, rowMenu.threads);
                           setRowMenu(null);
                         }}
                       >
                         完整保存到本地
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start"
                         onClick={() => {
                           setMoveIds(rowMenu.ids);
                           setMoveThreads(rowMenu.threads);
@@ -2099,9 +2107,11 @@ export default function App() {
                         }}
                       >
                         归入本地文件夹
-                      </button>
-                      <button
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start"
                         onClick={() => {
                           void mutate(
                             rowMenu.ids,
@@ -2115,7 +2125,7 @@ export default function App() {
                         {query.view === "trash"
                           ? "从废纸篓恢复"
                           : "移到本地废纸篓"}
-                      </button>
+                      </Button>
                     </div>
                   )}
                   <div className="mail-rows">
