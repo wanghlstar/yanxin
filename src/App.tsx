@@ -158,6 +158,7 @@ import type {
   Address,
   RemoteFolder,
   DataDirInfo,
+  DataDirCheck,
 } from "./lib/types";
 import { mailLink } from "./lib/mail-html";
 import { invoke } from "@tauri-apps/api/core";
@@ -929,9 +930,66 @@ export default function App() {
         title: "选择存档位置",
       });
       if (!picked || typeof picked !== "string") return;
-      const info = await call<DataDirInfo>("set_data_dir", { path: picked });
+      const check = await call<DataDirCheck>("check_data_dir", {
+        path: picked,
+      });
+      if (check.error) {
+        toast.error(check.error);
+        return;
+      }
+      if (!check.writable) {
+        toast.error("所选目录不可写，请检查权限或更换位置");
+        return;
+      }
+      if (check.isCurrent) {
+        toast("这就是当前位置");
+        return;
+      }
+      // 目标已有数据：直接切换（不迁移）
+      if (check.hasData) {
+        const ok = await askConfirmation({
+          title: "切换到已有数据目录",
+          description:
+            "该目录已包含邮件数据，将直接切换过去（不迁移、不删除任何数据）。重启后生效。",
+          action: "切换",
+        });
+        if (!ok) return;
+        const info = await call<DataDirInfo>("set_data_dir", { path: picked });
+        setDataDir(info);
+        toast.success("已切换，重启邮件后生效");
+        return;
+      }
+      // 空目录：先问是否迁移
+      const size = formatSize(check.migrationBytes);
+      const migrate = await askConfirmation({
+        title: "迁移现有数据？",
+        description: `该目录没有现有数据。迁移会把当前账号、规则与 ${check.migrationFiles} 封完整存档（${size}）移动到新位置；不迁移则直接使用空目录，账号需重新添加、邮件从服务器重新收取。`,
+        action: "迁移",
+      });
+      if (!migrate) {
+        const info = await call<DataDirInfo>("set_data_dir", { path: picked });
+        setDataDir(info);
+        toast.success("已切换到空目录，重启后账号需重新添加");
+        return;
+      }
+      // 迁移后再问是否清理旧数据
+      const removeSource = await askConfirmation({
+        title: "删除原位置数据？",
+        description:
+          "迁移完成后是否删除原位置的旧数据？删除后将只有新位置一份；建议先重启验证正常，再回来删除。",
+        action: "删除",
+        destructive: true,
+      });
+      const info = await call<DataDirInfo>("migrate_data_dir", {
+        path: picked,
+        removeSource,
+      });
       setDataDir(info);
-      toast.success("存档位置已更新，重启邮件后生效");
+      toast.success(
+        removeSource
+          ? "已迁移并清理旧数据，重启后生效"
+          : "已迁移（旧数据保留），重启后生效",
+      );
     } catch (e) {
       toast.error(String(e));
     }

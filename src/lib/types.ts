@@ -31,6 +31,15 @@ export interface RetentionSettings {
   overrides: FolderRetention[];
   summary?: RetentionSummary;
 }
+export interface DataDirCheck {
+  path: string;
+  isCurrent: boolean;
+  hasData: boolean;
+  writable: boolean;
+  error: string;
+  migrationFiles: number;
+  migrationBytes: number;
+}
 export interface DataDirInfo {
   path: string;
   source: "env" | "file" | "default";

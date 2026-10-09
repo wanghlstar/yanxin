@@ -479,6 +479,25 @@ export async function call<T = void>(
         break;
       case "test_notification":
         break;
+      case "check_data_dir":
+        result = {
+          path: String(args.path ?? ""),
+          isCurrent: false,
+          hasData: false,
+          writable: true,
+          error: "",
+          migrationFiles: 0,
+          migrationBytes: 0,
+        };
+        break;
+      case "migrate_data_dir":
+        result = {
+          path: String(args.path ?? ""),
+          source: "file",
+          configPath: "",
+          overridden: false,
+        };
+        break;
       case "data_dir_info":
         result = {
           path: "演示模式不保存本地存档",

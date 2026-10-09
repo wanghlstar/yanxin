@@ -107,6 +107,17 @@ impl Store {
     }
     // Write transactions use IMMEDIATE so the busy timeout applies before any
     // snapshot is read. DEFERRED read-to-write upgrades can fail with BUSY_SNAPSHOT.
+    /// 把当前数据库做一致快照到目标路径（迁移/备份共用）。
+    pub fn vacuum_into(&self, destination: &Path) -> Result<()> {
+        let _archive = self.archive_gate.read().map_err(err)?;
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(err)?;
+        }
+        let db = self.db()?;
+        db.execute("VACUUM INTO ?1", [destination.to_string_lossy().as_ref()])
+            .map_err(err)?;
+        Ok(())
+    }
     pub fn db(&self) -> Result<Connection> {
         let c = Connection::open(self.root.join("mail.sqlite3")).map_err(err)?;
         c.busy_timeout(std::time::Duration::from_secs(10))

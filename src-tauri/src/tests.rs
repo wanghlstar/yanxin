@@ -2326,3 +2326,55 @@ fn data_dir_normalization_validates_paths() {
     assert!(crate::normalize_data_dir(home, current, "relative/path").is_err());
     assert!(crate::normalize_data_dir(home, current, "/Volumes/Disk/Yanxin/archive").is_err());
 }
+
+#[test]
+fn data_dir_migration_copies_and_verifies_tree() {
+    use std::fs;
+    let temp = tempfile::tempdir().unwrap();
+    let src = temp.path().join("src");
+    let dst = temp.path().join("dst");
+    fs::create_dir_all(src.join("archive").join("a@x.com").join("INBOX")).unwrap();
+    fs::write(
+        src.join("archive")
+            .join("a@x.com")
+            .join("INBOX")
+            .join("h1.eml"),
+        b"mail one",
+    )
+    .unwrap();
+    fs::create_dir_all(src.join("archive").join("b@x.com").join("Sent")).unwrap();
+    fs::write(
+        src.join("archive")
+            .join("b@x.com")
+            .join("Sent")
+            .join("h2.eml"),
+        b"mail two",
+    )
+    .unwrap();
+    fs::write(src.join("mail.sqlite3"), b"db").unwrap();
+    // 复制 archive 子树并逐文件校验
+    let (files, bytes) = crate::copy_tree(&src.join("archive"), &dst.join("archive")).unwrap();
+    assert_eq!((files, bytes), (2, 16));
+    assert_eq!(
+        fs::read(
+            dst.join("archive")
+                .join("a@x.com")
+                .join("INBOX")
+                .join("h1.eml")
+        )
+        .unwrap(),
+        b"mail one"
+    );
+    // 统计与源一致
+    assert_eq!(crate::tree_stats(&src.join("archive")).unwrap(), (2, 16));
+    assert_eq!(crate::tree_stats(&dst.join("archive")).unwrap(), (2, 16));
+    // 不存在的目录统计为 0
+    assert_eq!(
+        crate::tree_stats(&temp.path().join("nope")).unwrap(),
+        (0, 0)
+    );
+    // 目标已有 mail.sqlite3 时视为“有数据”（调用方据此走切换而非迁移）
+    assert!(dst.join("mail.sqlite3").exists() == false);
+    fs::write(dst.join("mail.sqlite3"), b"db").unwrap();
+    assert!(dst.join("mail.sqlite3").exists());
+}

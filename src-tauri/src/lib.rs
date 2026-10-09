@@ -1034,6 +1034,173 @@ fn reset_data_dir(app: tauri::AppHandle) -> std::result::Result<DataDirInfo, Str
     resolve_data_root_info(&app).map_err(|e| e.to_string())
 }
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DataDirCheck {
+    path: String,
+    is_current: bool,
+    has_data: bool,
+    writable: bool,
+    error: String,
+    migration_files: u64,
+    migration_bytes: u64,
+}
+
+/// 递归复制目录内容，逐文件校验大小；返回 (文件数, 总字节)。
+pub(crate) fn copy_tree(src: &Path, dst: &Path) -> std::result::Result<(u64, u64), String> {
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    std::fs::create_dir_all(dst).map_err(|e| format!("无法创建目录：{e}"))?;
+    let entries = std::fs::read_dir(src).map_err(|e| format!("无法读取目录：{e}"))?;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("无法读取目录项：{e}"))?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            let (f, b) = copy_tree(&from, &to)?;
+            files += f;
+            bytes += b;
+        } else {
+            std::fs::copy(&from, &to).map_err(|e| format!("复制失败 {}：{e}", from.display()))?;
+            let size = std::fs::metadata(&from).map_err(|e| e.to_string())?.len();
+            let copied = std::fs::metadata(&to).map_err(|e| e.to_string())?.len();
+            if size != copied {
+                return Err(format!("复制校验失败：{}", from.display()));
+            }
+            files += 1;
+            bytes += size;
+        }
+    }
+    Ok((files, bytes))
+}
+
+/// 统计目录的文件数与总字节。
+pub(crate) fn tree_stats(path: &Path) -> std::result::Result<(u64, u64), String> {
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    if !path.exists() {
+        return Ok((0, 0));
+    }
+    let entries = std::fs::read_dir(path).map_err(|e| e.to_string())?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let p = entry.path();
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            let (f, b) = tree_stats(&p)?;
+            files += f;
+            bytes += b;
+        } else {
+            files += 1;
+            bytes += std::fs::metadata(&p).map_err(|e| e.to_string())?.len();
+        }
+    }
+    Ok((files, bytes))
+}
+
+#[tauri::command]
+fn check_data_dir(
+    app: tauri::AppHandle,
+    path: String,
+) -> std::result::Result<DataDirCheck, String> {
+    let info = resolve_data_root_info(&app).map_err(|e| e.to_string())?;
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    let (migration_files, migration_bytes) = tree_stats(Path::new(&info.path)).unwrap_or((0, 0));
+    let target = match normalize_data_dir(&home, Path::new(&info.path), &path) {
+        Ok(t) => t,
+        Err(e) => {
+            return Ok(DataDirCheck {
+                path: path.trim().to_string(),
+                is_current: false,
+                has_data: false,
+                writable: false,
+                error: e,
+                migration_files,
+                migration_bytes,
+            });
+        }
+    };
+    let is_current = target == Path::new(&info.path);
+    let has_data = target.join("mail.sqlite3").exists();
+    let writable = if is_current {
+        true
+    } else {
+        let created = std::fs::create_dir_all(&target);
+        match created {
+            Ok(()) => {
+                let probe = target.join(".yanxin-write-test");
+                let ok = std::fs::write(&probe, b"ok").is_ok();
+                let _ = std::fs::remove_file(&probe);
+                ok
+            }
+            Err(_) => false,
+        }
+    };
+    Ok(DataDirCheck {
+        path: target.to_string_lossy().into_owned(),
+        is_current,
+        has_data,
+        writable,
+        error: String::new(),
+        migration_files,
+        migration_bytes,
+    })
+}
+
+/// 迁移：把当前存档整体复制到新目录（数据库用 VACUUM INTO 保证一致快照），
+/// 校验通过后按需删除原目录，最后写入配置。调用方需重启生效。
+#[tauri::command]
+fn migrate_data_dir(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    path: String,
+    remove_source: bool,
+) -> std::result::Result<DataDirInfo, String> {
+    let info = resolve_data_root_info(&app).map_err(|e| e.to_string())?;
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    let current = Path::new(&info.path).to_path_buf();
+    let target = normalize_data_dir(&home, &current, &path)?;
+    if target == current {
+        return Ok(info);
+    }
+    if target.join("mail.sqlite3").exists() {
+        return Err("目标目录已包含数据；如只需切换请直接更改位置".into());
+    }
+    // 1. 复制邮件存档（逐文件校验）
+    let (files, bytes) = copy_tree(&current.join("archive"), &target.join("archive"))?;
+    // 2. 数据库一致快照
+    state
+        .store
+        .vacuum_into(&target.join("mail.sqlite3"))
+        .map_err(|e| e.to_string())?;
+    // 3. 复核：目标 archive 与源一致
+    let (src_files, src_bytes) = tree_stats(&current.join("archive"))?;
+    if files != src_files || bytes != src_bytes {
+        return Err("迁移后校验不一致，原数据未动，请检查目标目录".into());
+    }
+    // 4. 按需清理原数据（应用退出后失效；删除后仅存新位置一份）
+    if remove_source {
+        std::fs::remove_dir_all(&current).map_err(|e| format!("已迁移但删除原数据失败：{e}"))?;
+    }
+    // 5. 写入配置
+    let file = data_dir_config_files(&app)
+        .into_iter()
+        .next()
+        .ok_or("无法确定配置文件位置")?;
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("无法创建配置目录：{e}"))?;
+    }
+    std::fs::write(
+        &file,
+        format!(
+            "{}
+",
+            target.to_string_lossy()
+        ),
+    )
+    .map_err(|e| format!("无法写入配置：{e}"))?;
+    resolve_data_root_info(&app).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) -> Result<()> {
     app.restart();
@@ -1324,6 +1491,8 @@ pub fn run() {
             data_dir_info,
             set_data_dir,
             reset_data_dir,
+            check_data_dir,
+            migrate_data_dir,
             restart_app,
             open_mail_link
         ])
