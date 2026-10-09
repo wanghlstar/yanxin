@@ -918,6 +918,128 @@ async fn restore_archive(state: tauri::State<'_, AppState>, path: String) -> Res
 fn open_data_folder(state: tauri::State<AppState>) -> Result<()> {
     open::that(&state.store.root).map_err(err)
 }
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DataDirInfo {
+    path: String,
+    source: String, // env | file | default
+    config_path: String,
+    overridden: bool, // 环境变量覆盖中（界面设置暂不生效）
+}
+
+fn data_dir_config_files<M: tauri::Manager<tauri::Wry>>(app: &M) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::new();
+    if let Ok(home) = app.path().home_dir() {
+        files.push(home.join(".config/yanxin/data-dir"));
+        files.push(home.join(".yanxin-data-dir"));
+    }
+    files
+}
+
+fn resolve_data_root_info<M: tauri::Manager<tauri::Wry>>(
+    app: &M,
+) -> std::result::Result<DataDirInfo, tauri::Error> {
+    let default = app.path().app_data_dir()?;
+    if let Ok(p) = std::env::var("YANXIN_DATA_DIR") {
+        let p = p.trim();
+        if !p.is_empty() {
+            return Ok(DataDirInfo {
+                path: expand_tilde(app, p).to_string_lossy().into_owned(),
+                source: "env".into(),
+                config_path: String::new(),
+                overridden: true,
+            });
+        }
+    }
+    for f in data_dir_config_files(app) {
+        if let Ok(s) = std::fs::read_to_string(&f) {
+            let s = s.lines().next().unwrap_or("").trim();
+            if !s.is_empty() {
+                return Ok(DataDirInfo {
+                    path: expand_tilde(app, s).to_string_lossy().into_owned(),
+                    source: "file".into(),
+                    config_path: f.to_string_lossy().into_owned(),
+                    overridden: false,
+                });
+            }
+        }
+    }
+    Ok(DataDirInfo {
+        path: default.to_string_lossy().into_owned(),
+        source: "default".into(),
+        config_path: String::new(),
+        overridden: false,
+    })
+}
+
+/// 规范化并校验用户在界面上选择的存档目录（纯函数，便于测试）。
+pub(crate) fn normalize_data_dir(
+    home: &Path,
+    current: &Path,
+    picked: &str,
+) -> std::result::Result<std::path::PathBuf, String> {
+    let picked = picked.trim();
+    if picked.is_empty() {
+        return Err("路径不能为空".into());
+    }
+    let path = if let Some(rest) = picked.strip_prefix("~/") {
+        home.join(rest)
+    } else {
+        std::path::PathBuf::from(picked)
+    };
+    if !path.is_absolute() {
+        return Err("请选择绝对路径".into());
+    }
+    if path != current && path.starts_with(current) {
+        return Err("不能把存档目录放到当前存档目录内部".into());
+    }
+    Ok(path)
+}
+
+#[tauri::command]
+fn data_dir_info(app: tauri::AppHandle) -> std::result::Result<DataDirInfo, String> {
+    resolve_data_root_info(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_data_dir(app: tauri::AppHandle, path: String) -> std::result::Result<DataDirInfo, String> {
+    let info = resolve_data_root_info(&app).map_err(|e| e.to_string())?;
+    let home = app.path().home_dir().map_err(|e| e.to_string())?;
+    let target = normalize_data_dir(&home, Path::new(&info.path), &path)?;
+    if target == Path::new(&info.path) {
+        return Ok(info); // 无变化
+    }
+    std::fs::create_dir_all(&target).map_err(|e| format!("无法创建目录：{e}"))?;
+    let probe = target.join(".yanxin-write-test");
+    std::fs::write(&probe, b"ok").map_err(|e| format!("目录不可写：{e}"))?;
+    let _ = std::fs::remove_file(&probe);
+    let file = data_dir_config_files(&app)
+        .into_iter()
+        .next()
+        .ok_or("无法确定配置文件位置")?;
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("无法创建配置目录：{e}"))?;
+    }
+    std::fs::write(&file, format!("{}\n", target.to_string_lossy()))
+        .map_err(|e| format!("无法写入配置：{e}"))?;
+    resolve_data_root_info(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reset_data_dir(app: tauri::AppHandle) -> std::result::Result<DataDirInfo, String> {
+    for f in data_dir_config_files(&app) {
+        let _ = std::fs::remove_file(f);
+    }
+    resolve_data_root_info(&app).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) -> Result<()> {
+    app.restart();
+    #[allow(unreachable_code)]
+    Ok(())
+}
 fn web_link(url: &str) -> Result<url::Url> {
     let parsed = url::Url::parse(url).map_err(err)?;
     if !matches!(parsed.scheme(), "https" | "http") || parsed.host_str().is_none() {
@@ -964,7 +1086,9 @@ fn window_state_flags() -> tauri_plugin_window_state::StateFlags {
 /// 取首行）> 默认 App 数据目录。支持 ~ 开头。
 /// 指向新目录后首次启动会按账号重新收取完整存档（凭据在系统钥匙串不受影响）；
 /// 想保留旧数据，先把旧目录整体复制到新位置再启动。
-fn resolve_data_root(app: &tauri::App) -> std::result::Result<std::path::PathBuf, tauri::Error> {
+fn resolve_data_root<M: tauri::Manager<tauri::Wry>>(
+    app: &M,
+) -> std::result::Result<std::path::PathBuf, tauri::Error> {
     if let Ok(p) = std::env::var("YANXIN_DATA_DIR") {
         let p = p.trim();
         if !p.is_empty() {
@@ -987,7 +1111,7 @@ fn resolve_data_root(app: &tauri::App) -> std::result::Result<std::path::PathBuf
     app.path().app_data_dir()
 }
 
-fn expand_tilde(app: &tauri::App, p: &str) -> std::path::PathBuf {
+fn expand_tilde<M: tauri::Manager<tauri::Wry>>(app: &M, p: &str) -> std::path::PathBuf {
     if let Some(rest) = p.strip_prefix("~/") {
         if let Ok(home) = app.path().home_dir() {
             return home.join(rest);
@@ -1039,7 +1163,7 @@ pub fn run() {
                     let _ = window.hide();
                 }
             }
-            let store = Store::new(resolve_data_root(&app)?).map_err(std::io::Error::other)?;
+            let store = Store::new(resolve_data_root(&*app)?).map_err(std::io::Error::other)?;
             let gate = Arc::new(Mutex::new(()));
             let send_gate = Arc::new(Mutex::new(()));
             let realtime = Arc::new(realtime::RealtimeControl::default());
@@ -1197,6 +1321,10 @@ pub fn run() {
             delete_local_archives,
             restore_archive,
             open_data_folder,
+            data_dir_info,
+            set_data_dir,
+            reset_data_dir,
+            restart_app,
             open_mail_link
         ])
         .build(tauri::generate_context!())

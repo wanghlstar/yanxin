@@ -2300,3 +2300,29 @@ fn local_rule_flags_survive_refresh_upgrade_and_restart_until_explicit_user_chan
     let m = s.mail(&id).unwrap();
     assert!(m.is_read && m.starred);
 }
+
+#[test]
+fn data_dir_normalization_validates_paths() {
+    use std::path::{Path, PathBuf};
+    let home = Path::new("/Users/tester");
+    let current = Path::new("/Volumes/Disk/Yanxin");
+    // 绝对路径去空白
+    assert_eq!(
+        crate::normalize_data_dir(home, current, "  /Volumes/Other/Mail  ").unwrap(),
+        PathBuf::from("/Volumes/Other/Mail")
+    );
+    // ~ 展开
+    assert_eq!(
+        crate::normalize_data_dir(home, current, "~/Mailbox/Yanxin").unwrap(),
+        home.join("Mailbox/Yanxin")
+    );
+    // 与当前相同允许（命令层按“无变化”处理）
+    assert_eq!(
+        crate::normalize_data_dir(home, current, "/Volumes/Disk/Yanxin").unwrap(),
+        current
+    );
+    // 空 / 相对 / 嵌套当前目录 均拒绝
+    assert!(crate::normalize_data_dir(home, current, "   ").is_err());
+    assert!(crate::normalize_data_dir(home, current, "relative/path").is_err());
+    assert!(crate::normalize_data_dir(home, current, "/Volumes/Disk/Yanxin/archive").is_err());
+}

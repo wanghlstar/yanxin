@@ -157,6 +157,7 @@ import type {
   Account,
   Address,
   RemoteFolder,
+  DataDirInfo,
 } from "./lib/types";
 import { mailLink } from "./lib/mail-html";
 import { invoke } from "@tauri-apps/api/core";
@@ -266,6 +267,12 @@ export default function App() {
   useEffect(() => {
     if (data.remoteFolders) setServerFolders(data.remoteFolders);
   }, [data.remoteFolders]);
+  const [dataDir, setDataDir] = useState<DataDirInfo | null>(null);
+  useEffect(() => {
+    void call<DataDirInfo>("data_dir_info")
+      .then(setDataDir)
+      .catch(() => setDataDir(null));
+  }, []);
   useEffect(() => {
     if (!selected || page !== "mail") setReaderExpanded(false);
   }, [selected, page]);
@@ -908,6 +915,43 @@ export default function App() {
         toast.error(String(e));
       }
   }
+  async function changeDataDir() {
+    if (isDemo()) {
+      toast.error("演示模式不支持更改存档位置");
+      return;
+    }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: dataDir?.path,
+        title: "选择存档位置",
+      });
+      if (!picked || typeof picked !== "string") return;
+      const info = await call<DataDirInfo>("set_data_dir", { path: picked });
+      setDataDir(info);
+      toast.success("存档位置已更新，重启邮件后生效");
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
+  async function resetDataDir() {
+    try {
+      const info = await call<DataDirInfo>("reset_data_dir");
+      setDataDir(info);
+      toast.success("已恢复默认位置，重启邮件后生效");
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
+  async function restartNow() {
+    try {
+      await call("restart_app");
+    } catch (e) {
+      toast.error(String(e));
+    }
+  }
   async function loadFolders(id: string) {
     if (folderLoading.includes(id)) return;
     setFolderLoading((ids) => [...ids, id]);
@@ -1447,6 +1491,38 @@ export default function App() {
                   </Button>
                 </div>
                 <p className="storage-path">{data.dataDir}</p>
+                <div className="storage-actions">
+                  <Button
+                    variant="outline"
+                    onClick={() => void changeDataDir()}
+                  >
+                    <FolderOpen size={15} />
+                    更改存档位置…
+                  </Button>
+                  {dataDir && dataDir.source !== "default" && (
+                    <Button variant="ghost" onClick={() => void resetDataDir()}>
+                      恢复默认位置
+                    </Button>
+                  )}
+                  {dataDir && dataDir.source === "file" && (
+                    <Button variant="outline" onClick={() => void restartNow()}>
+                      立即重启生效
+                    </Button>
+                  )}
+                </div>
+                {dataDir && (
+                  <p className="storage-hint">
+                    当前位置来源：
+                    {dataDir.source === "env"
+                      ? "环境变量"
+                      : dataDir.source === "file"
+                        ? "配置文件"
+                        : "默认位置"}
+                    {dataDir.overridden &&
+                      "（环境变量覆盖中，界面设置暂不生效）"}
+                    {dataDir.source === "file" && "，更改后需重启邮件生效"}
+                  </p>
+                )}
               </Card>
               <ArchiveJobsPanel />
               <StorageTools />

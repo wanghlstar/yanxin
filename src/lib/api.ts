@@ -479,6 +479,23 @@ export async function call<T = void>(
         break;
       case "test_notification":
         break;
+      case "data_dir_info":
+        result = {
+          path: "演示模式不保存本地存档",
+          source: "default",
+          configPath: "",
+          overridden: false,
+        };
+        break;
+      case "set_data_dir":
+      case "reset_data_dir":
+        result = {
+          path: "演示模式不保存本地存档",
+          source: "default",
+          configPath: "",
+          overridden: false,
+        };
+        break;
       case "get_preferences":
         result = JSON.parse(
           localStorage.getItem(key + "-preferences") ||
