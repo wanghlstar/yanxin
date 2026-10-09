@@ -207,6 +207,63 @@ fn discover_remote_folders<T: std::io::Read + Write>(
         .collect())
 }
 
+/// 在服务器上新建文件夹，返回刷新后的文件夹列表。
+pub fn create_remote_folder(a: &Account, name: &str) -> Result<Vec<RemoteFolder>> {
+    let display = name.trim();
+    if display.is_empty() {
+        return Err("文件夹名称不能为空".into());
+    }
+    if display
+        .chars()
+        .any(|c| c == '/' || c == char::from(92u8) || (c as u32) < 0x20)
+    {
+        return Err("文件夹名称不能包含斜杠或反斜杠".into());
+    }
+    let raw = crate::remote::encode_folder_name(display);
+    if raw.is_empty() {
+        return Err("文件夹名称无效".into());
+    }
+    let secret = auth::credentials(a).map_err(|e| e.to_string())?;
+    let mut session = imap_session(a, &secret).map_err(|e| e.to_string())?;
+    let result = (|| -> Result<()> {
+        session
+            .create(&raw)
+            .map_err(|e| format!("新建文件夹失败：{e}"))?;
+        Ok(())
+    })();
+    drop(session);
+    result?;
+    let secret = auth::credentials(a).map_err(|e| e.to_string())?;
+    let mut session = imap_session(a, &secret).map_err(|e| e.to_string())?;
+    let folders = discover_remote_folders(&a.id, &mut session)?;
+    drop(session);
+    Ok(folders)
+}
+/// 删除服务器上的文件夹，返回刷新后的文件夹列表。
+pub fn delete_remote_folder(a: &Account, name: &str) -> Result<Vec<RemoteFolder>> {
+    if name.trim().is_empty() {
+        return Err("文件夹名称无效".into());
+    }
+    if name.eq_ignore_ascii_case("INBOX") {
+        return Err("收件箱不能删除".into());
+    }
+    let secret = auth::credentials(a).map_err(|e| e.to_string())?;
+    let mut session = imap_session(a, &secret).map_err(|e| e.to_string())?;
+    let result = (|| -> Result<()> {
+        session
+            .delete(name)
+            .map_err(|e| format!("删除文件夹失败：{e}"))?;
+        Ok(())
+    })();
+    drop(session);
+    result?;
+    let secret = auth::credentials(a).map_err(|e| e.to_string())?;
+    let mut session = imap_session(a, &secret).map_err(|e| e.to_string())?;
+    let folders = discover_remote_folders(&a.id, &mut session)?;
+    drop(session);
+    Ok(folders)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum WatchOutcome {
     Stopped,
@@ -3451,6 +3508,23 @@ fn apply_flag_session<T: std::io::Read + Write>(
     let blocked = |s: &str| Failure::Blocked(s.into());
     let (validity, uid, content_hash) =
         remote_identity(&op.remote_id).ok_or_else(|| blocked("服务器邮件标识无效，请重新收取"))?;
+    if op.action == "delete" {
+        // 彻底删除：标记 \Deleted 后 UID EXPUNGE，再确认邮件已不存在
+        session
+            .uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)")
+            .map_err(|e| flag_error("标记删除", e))?;
+        session
+            .uid_expunge(uid.to_string())
+            .map_err(|e| flag_error("清除邮件", e))?;
+        let gone = session
+            .uid_fetch(uid.to_string(), "(UID)")
+            .map(|f| f.iter().count() == 0)
+            .map_err(|e| flag_error("核对删除", e))?;
+        if !gone {
+            return Err(blocked("服务器未确认邮件已删除，本地存档保留"));
+        }
+        return Ok(());
+    }
     let flag = match op.action.as_str() {
         "read" => Flag::Seen,
         "star" => Flag::Flagged,

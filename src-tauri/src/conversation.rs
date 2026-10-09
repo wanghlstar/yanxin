@@ -100,7 +100,9 @@ pub fn summaries(messages: Vec<Mail>, index: &Index) -> Vec<Mail> {
 }
 impl Store {
     pub fn change_mail(&self, id: &str, action: &str, value: &str) -> Result<()> {
-        if matches!(action, "read" | "star" | "trash") && !matches!(value, "true" | "false") {
+        if matches!(action, "read" | "star" | "trash" | "delete")
+            && !matches!(value, "true" | "false")
+        {
             return Err("无效状态值".into());
         }
         let selected = self.mail(id)?;
@@ -111,8 +113,10 @@ impl Store {
         let rows = tx.prepare("SELECT data FROM messages WHERE id=?1 OR (account_id=?2 AND ((?3!='' AND json_extract(data,'$.messageId')=?3) OR (?4!='' AND COALESCE(NULLIF(json_extract(data,'$.serverMessageId'),''),json_extract(data,'$.messageId'))=?4)))").map_err(err)?
             .query_map(rusqlite::params![id, selected.account_id, selected.message_id, if selected.server_message_id.is_empty() { &selected.message_id } else { &selected.server_message_id }], |r| r.get::<_, String>(0)).map_err(err)?
             .collect::<std::result::Result<Vec<_>,_>>().map_err(err)?;
+        let mut row_ids: Vec<String> = Vec::new();
         for data in rows {
             let mut mail: Mail = serde_json::from_str(&data).map_err(err)?;
+            row_ids.push(mail.id.clone());
             match action {
                 "read" => {
                     mail.is_read = value == "true";
@@ -123,6 +127,7 @@ impl Store {
                     mail.local_star_override = None;
                 }
                 "trash" => mail.trashed = value == "true",
+                "delete" => mail.trashed = true, // 先入废纸篓，服务器确认后清除本地
                 "folder" if !value.trim().is_empty() => mail.local_folder = value.into(),
                 _ => return Err("无效动作或空文件夹名称".into()),
             }
@@ -133,7 +138,24 @@ impl Store {
             )
             .map_err(err)?;
         }
-        tx.commit().map_err(err)
+        tx.commit().map_err(err)?;
+        // 彻底删除：没有活跃服务器来源的邮件无需服务端操作，直接清除本地
+        if action == "delete" {
+            for id in row_ids {
+                let has_source: bool = self
+                    .db()?
+                    .query_row(
+                        "SELECT EXISTS(SELECT 1 FROM sources WHERE mail_id=?1 AND active=1)",
+                        [&id],
+                        |r| r.get(0),
+                    )
+                    .map_err(err)?;
+                if !has_source {
+                    let _ = self.purge_mail(&id);
+                }
+            }
+        }
+        Ok(())
     }
     pub fn conversation_index(&self, _account: &str) -> Result<Arc<Index>> {
         let mut cached = self.conversation_cache.lock().map_err(err)?;

@@ -51,6 +51,7 @@ import {
   Cloud,
   FileText,
   Folder,
+  FolderPlus,
   FolderOpen,
   HardDrive,
   Inbox,
@@ -111,6 +112,7 @@ import {
   DropdownMenuTrigger,
 } from "./components/ui/dropdown-menu";
 import { Input } from "./components/ui/input";
+import { Label } from "./components/ui/label";
 import {
   Dialog,
   DialogContent,
@@ -280,6 +282,13 @@ export default function App() {
     threads: boolean;
   } | null>(null);
   const lastRowIndex = useRef(-1);
+  // 服务器文件夹新建/删除对话框
+  const [folderDialog, setFolderDialog] = useState<{
+    accountId: string;
+    mode: "create" | "delete";
+    name?: string;
+  } | null>(null);
+  const [folderName, setFolderName] = useState("");
   // 本地存档树的账号组展开状态
   const [archiveOpen, setArchiveOpen] = useState<Record<string, boolean>>({});
   // 点"本地存档"整体隐藏/显示账号组（不影响各账号内文件夹的展开状态）
@@ -1295,6 +1304,18 @@ export default function App() {
                           />
                         </Button>
                       </CollapsibleTrigger>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`在 ${a.name} 新建文件夹`}
+                        title="新建服务器文件夹"
+                        onClick={() => {
+                          setFolderDialog({ accountId: a.id, mode: "create" });
+                          setFolderName("");
+                        }}
+                      >
+                        <FolderPlus size={13} />
+                      </Button>
                     </div>
                     <CollapsibleContent className="remote-folder-list">
                       {folderLoading.includes(a.id) &&
@@ -1323,6 +1344,13 @@ export default function App() {
                             : ""
                         }
                         onSelect={(name) => void openRemoteFolder(a.id, name)}
+                        onDelete={(name) =>
+                          setFolderDialog({
+                            accountId: a.id,
+                            mode: "delete",
+                            name,
+                          })
+                        }
                       />
                     </CollapsibleContent>
                   </Collapsible>
@@ -2099,6 +2127,17 @@ export default function App() {
                       >
                         <Trash2 size={15} />
                       </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-destructive"
+                        title="彻底删除（含服务器副本）"
+                        onClick={() =>
+                          void mutate(checked, "delete", "true", grouped)
+                        }
+                      >
+                        <Trash2 size={15} />
+                      </Button>
                     </div>
                   )}
                   {rowMenu && (
@@ -2192,6 +2231,22 @@ export default function App() {
                         })
                           ? "从废纸篓恢复"
                           : "移到本地废纸篓"}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start text-destructive"
+                        onClick={() => {
+                          void mutate(
+                            rowMenu.ids,
+                            "delete",
+                            "true",
+                            rowMenu.threads,
+                          );
+                          setRowMenu(null);
+                        }}
+                      >
+                        彻底删除（含服务器）
                       </Button>
                     </div>
                   )}
@@ -2795,6 +2850,68 @@ export default function App() {
         </DialogContent>
       </Dialog>
       {confirmationDialog}
+      {folderDialog && (
+        <Dialog open onOpenChange={(open) => !open && setFolderDialog(null)}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>
+                {folderDialog.mode === "create"
+                  ? "新建服务器文件夹"
+                  : "删除文件夹"}
+              </DialogTitle>
+              <DialogDescription>
+                {folderDialog.mode === "create"
+                  ? "将直接在 IMAP 服务器上创建，所有设备可见。"
+                  : `将在服务器上永久删除「${folderDialog.name}」，此操作不可恢复。`}
+              </DialogDescription>
+            </DialogHeader>
+            {folderDialog.mode === "create" && (
+              <div className="space-y-2">
+                <Label htmlFor="new-folder-name">文件夹名称</Label>
+                <Input
+                  id="new-folder-name"
+                  value={folderName}
+                  onChange={(e) => setFolderName(e.target.value)}
+                  placeholder="例如：项目归档"
+                />
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setFolderDialog(null)}>
+                取消
+              </Button>
+              <Button
+                variant={
+                  folderDialog.mode === "delete" ? "destructive" : "default"
+                }
+                disabled={folderDialog.mode === "create" && !folderName.trim()}
+                onClick={() => {
+                  const d = folderDialog;
+                  void (async () => {
+                    try {
+                      await call(
+                        d.mode === "create" ? "create_folder" : "delete_folder",
+                        d.mode === "create"
+                          ? { id: d.accountId, name: folderName.trim() }
+                          : { id: d.accountId, name: d.name ?? "" },
+                      );
+                      await refresh();
+                      toast.success(
+                        d.mode === "create" ? "文件夹已创建" : "文件夹已删除",
+                      );
+                    } catch (e) {
+                      toast.error(String(e));
+                    }
+                  })();
+                  setFolderDialog(null);
+                }}
+              >
+                {folderDialog.mode === "create" ? "创建" : "删除"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       <UpdateDialog updates={updates} blocked={!!draft} />
     </SidebarProvider>
   );

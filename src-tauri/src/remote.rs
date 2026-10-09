@@ -497,6 +497,53 @@ pub fn excluded_from_auto_sync(folder: &RemoteFolder) -> bool {
 }
 // IMAP modified UTF-7 is a wire name; never pass a decoded display name back
 // to SELECT. Retain exact wire names in queries and source tracking.
+/// 把用户输入的文件夹名编码为 IMAP modified UTF-7（中文 → &base64-）。
+pub fn encode_folder_name(name: &str) -> String {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let name = name.trim();
+    if name.is_empty() {
+        return String::new();
+    }
+    let needs_encoding = name
+        .chars()
+        .any(|c| !c.is_ascii() || c == '&' || (c as u32) < 0x20 || (c as u32) == 0x7f);
+    if !needs_encoding {
+        return name.to_string();
+    }
+    let mut out = String::new();
+    let mut buf: Vec<u16> = Vec::new();
+    let flush = |out: &mut String, buf: &mut Vec<u16>| {
+        if buf.is_empty() {
+            return;
+        }
+        let bytes: Vec<u8> = buf.iter().flat_map(|u| u.to_be_bytes()).collect();
+        let mut encoded = STANDARD.encode(&bytes).replace('/', ",");
+        while encoded.len() % 4 != 0 {
+            encoded.push('=');
+        }
+        out.push('&');
+        out.push_str(&encoded);
+        out.push('-');
+        buf.clear();
+    };
+    for c in name.chars() {
+        if c == '&' {
+            flush(&mut out, &mut buf);
+            out.push_str("&-");
+        } else if c.is_ascii() && (c as u32) >= 0x20 && (c as u32) != 0x7f {
+            flush(&mut out, &mut buf);
+            out.push(c);
+        } else {
+            let mut tmp = [0u16; 2];
+            for u in c.encode_utf16(&mut tmp) {
+                buf.push(*u);
+            }
+        }
+    }
+    flush(&mut out, &mut buf);
+    out
+}
+
 pub fn display_name(name: &str) -> String {
     use base64::{engine::general_purpose::STANDARD, Engine};
     let mut out = String::new();

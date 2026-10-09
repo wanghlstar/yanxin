@@ -1093,6 +1093,49 @@ fn tier_recall(state: tauri::State<AppState>) -> std::result::Result<u64, String
 }
 
 #[tauri::command]
+async fn create_folder(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<Vec<models::RemoteFolder>> {
+    let store = state.store.clone();
+    let gate = state.gate.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _history = gate.lock().map_err(err)?;
+        let a = store.account(&id)?;
+        if !a.enabled {
+            return Err("账号已暂停，请先恢复".into());
+        }
+        let folders = network::create_remote_folder(&a, &name)?;
+        store.save_remote_folders(&id, &folders)?;
+        Ok(folders)
+    })
+    .await
+    .map_err(err)?
+}
+#[tauri::command]
+async fn delete_folder(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    name: String,
+) -> Result<Vec<models::RemoteFolder>> {
+    let store = state.store.clone();
+    let gate = state.gate.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _history = gate.lock().map_err(err)?;
+        let a = store.account(&id)?;
+        if !a.enabled {
+            return Err("账号已暂停，请先恢复".into());
+        }
+        let folders = network::delete_remote_folder(&a, &name)?;
+        store.save_remote_folders(&id, &folders)?;
+        Ok(folders)
+    })
+    .await
+    .map_err(err)?
+}
+
+#[tauri::command]
 fn local_archive_tree(
     state: tauri::State<AppState>,
 ) -> std::result::Result<Vec<models::LocalArchiveGroup>, String> {
@@ -1605,6 +1648,8 @@ pub fn run() {
             normalize_archive_paths,
             tier_recall,
             local_archive_tree,
+            create_folder,
+            delete_folder,
             set_data_dir,
             reset_data_dir,
             check_data_dir,

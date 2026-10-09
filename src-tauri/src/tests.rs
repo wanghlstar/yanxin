@@ -2527,3 +2527,17 @@ fn normalize_renames_encoded_folder_to_chinese_and_recall_works() {
     // 经内部根可读
     assert_eq!(s.read_archive(Some(&new_rel), &m.hash).unwrap(), raw());
 }
+
+#[test]
+fn folder_name_encodes_and_decodes_roundtrip() {
+    use crate::remote::{display_name, encode_folder_name};
+    for name in ["深港日检", "上线申请", "Sent", "A B-C_1", "混合abc中文"] {
+        let encoded = encode_folder_name(name);
+        assert_eq!(display_name(&encoded), name, "{name} 编解码应一致");
+    }
+    // & 与层级分隔符
+    assert_eq!(encode_folder_name("a&b"), "a&-b");
+    assert_eq!(display_name("a&-b"), "a&b");
+    // 纯 ASCII 原样通过（"/"是 IMAP 层级分隔符，由 UI 层拦截）
+    assert_eq!(encode_folder_name("PlainName-1"), "PlainName-1");
+}

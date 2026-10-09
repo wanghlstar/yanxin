@@ -84,7 +84,7 @@ pub fn initialize(db: &rusqlite::Connection) -> Result<()> {
         UPDATE server_operations SET status='queued',next_attempt=0 WHERE status='running';") .map_err(err)
 }
 pub fn enqueue(tx: &Transaction<'_>, mail: &Mail, action: &str, value: bool) -> Result<()> {
-    if !matches!(action, "read" | "star") {
+    if !matches!(action, "read" | "star" | "delete") {
         return Ok(());
     }
     let data: Option<String> = tx
@@ -266,6 +266,8 @@ impl Store {
             .map_err(|_| blocked("本地邮件记录已移除"))?;
         let desired = if op.action == "read" {
             mail.is_read
+        } else if op.action == "delete" {
+            mail.trashed
         } else {
             mail.starred
         };
@@ -323,8 +325,13 @@ pub fn start(store: Store, app: tauri::AppHandle) {
                                 Err(Failure::Retry("服务器状态同步中断，将自动重试".into()))
                             })
                         });
-                        if let Err(e) = store.finish_operation(&op, result) {
+                        let finished = store.finish_operation(&op, result);
+                        if let Err(e) = &finished {
                             let _ = store.log(&format!("服务器状态同步记录失败：{e}"));
+                        }
+                        // 服务器确认彻底删除后，清除本地记录与存档文件
+                        if op.action == "delete" && finished.is_ok() {
+                            let _ = store.purge_mail(&op.mail_id);
                         }
                         let _ = app.emit("server-operations-updated", ());
                         break;

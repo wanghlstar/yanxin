@@ -3222,6 +3222,18 @@ button.nav-item {
 .nav-item.folder-item[data-state="closed"] > svg:last-child {
   transform: rotate(-90deg);
 }
+/* 服务器文件夹行内删除按钮：默认隐藏，悬停显示 */
+.remote-folder-row {
+  display: flex;
+  align-items: center;
+}
+.remote-folder-row .folder-delete-btn {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.remote-folder-row:hover .folder-delete-btn {
+  opacity: 1;
+}
 /* 通用折叠箭头（最近活动/同步任务） */
 .collapse-chevron {
   transition: transform 0.15s;

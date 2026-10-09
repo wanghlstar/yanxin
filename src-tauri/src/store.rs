@@ -280,6 +280,37 @@ impl Store {
         }
         Ok(moved)
     }
+    /// 彻底删除本地记录与存档文件（服务器删除确认后调用）。
+    pub fn purge_mail(&self, id: &str) -> Result<()> {
+        let mail = self.mail(id)?;
+        let rel = mail
+            .rel_path
+            .clone()
+            .unwrap_or_else(|| format!("archive/{}.eml", mail.hash));
+        let roots = self
+            .archive_roots
+            .read()
+            .map_err(|e| e.to_string())?
+            .clone();
+        for root in &roots {
+            let p = root.join(&rel);
+            if p.exists() {
+                let _ = std::fs::remove_file(p);
+            }
+        }
+        let mut db = self.db()?;
+        let tx = db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(err)?;
+        tx.execute("DELETE FROM sources WHERE mail_id=?1", [id])
+            .map_err(err)?;
+        tx.execute("DELETE FROM server_operations WHERE mail_id=?1", [id])
+            .map_err(err)?;
+        tx.execute("DELETE FROM messages WHERE id=?1", [id])
+            .map_err(err)?;
+        tx.commit().map_err(err)?;
+        Ok(())
+    }
     /// 取回：把外置根的存档文件搬回内部根（外置盘不在时跳过）。
     pub fn tier_recall(&self) -> Result<u64> {
         let prefs = self.preferences()?;

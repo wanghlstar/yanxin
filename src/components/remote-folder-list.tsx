@@ -26,10 +26,12 @@ export function RemoteFolderList({
   folders,
   selected,
   onSelect,
+  onDelete,
 }: {
   folders: RemoteFolder[];
   selected: string;
   onSelect: (name: string) => void;
+  onDelete?: (name: string) => void;
 }) {
   const tree = useMemo(() => remoteFolderTree(folders), [folders]);
   return (
@@ -40,6 +42,7 @@ export function RemoteFolderList({
           node={node}
           selected={selected}
           onSelect={onSelect}
+          onDelete={onDelete}
         />
       ))}
     </div>
@@ -50,10 +53,12 @@ function FolderBranch({
   node,
   selected,
   onSelect,
+  onDelete,
 }: {
   node: FolderNode;
   selected: string;
   onSelect: (name: string) => void;
+  onDelete?: (name: string) => void;
 }) {
   const containsSelected = (node: FolderNode): boolean =>
     node.folder?.name === selected || node.children.some(containsSelected);
@@ -115,6 +120,20 @@ function FolderBranch({
           />
         )}
       </Button>
+      {onDelete &&
+        node.folder &&
+        node.folder.name.toLowerCase() !== "inbox" && (
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="folder-delete-btn text-destructive"
+            aria-label={`删除文件夹 ${node.label}`}
+            title="删除服务器文件夹"
+            onClick={() => onDelete(node.folder!.name)}
+          >
+            <Trash2 size={13} />
+          </Button>
+        )}
     </div>
   );
   if (!hasChildren) return row;
@@ -128,6 +147,7 @@ function FolderBranch({
             node={child}
             selected={selected}
             onSelect={onSelect}
+            onDelete={onDelete}
           />
         ))}
       </CollapsibleContent>
