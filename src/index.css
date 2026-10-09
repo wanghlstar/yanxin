@@ -3222,6 +3222,13 @@ button.nav-item {
 .nav-item.folder-item[data-state="closed"] > svg:last-child {
   transform: rotate(-90deg);
 }
+/* 通用折叠箭头（最近活动/同步任务） */
+.collapse-chevron {
+  transition: transform 0.15s;
+}
+[data-state="open"] > .collapse-chevron {
+  transform: rotate(90deg);
+}
 /* 存档树下文件夹缩进，层级分明 */
 .nav-item.folder-item.nested {
   padding-left: 34px;

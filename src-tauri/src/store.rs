@@ -604,6 +604,7 @@ impl Store {
                  FROM trusted_sources s JOIN messages m ON m.id = s.mail_id
                  LEFT JOIN remote_folders rf ON rf.account_id = s.account_id AND rf.name = s.folder
                  WHERE s.active=1 AND COALESCE(json_extract(m.data,'$.savedLocally'),1)=1
+                       AND COALESCE(json_extract(m.data,'$.trashed'),0)=0
                  GROUP BY s.account_id, s.folder",
             )
             .map_err(err)?;

@@ -70,6 +70,15 @@ afterEach(async () => {
 });
 async function render() {
   await act(async () => root.render(<ServerOperations />));
+  await expand();
+}
+async function expand() {
+  // 列表默认折叠，测试需先展开
+  await act(async () => {
+    host
+      .querySelectorAll("button")
+      .forEach((b) => b.textContent?.includes("同步任务") && b.click());
+  });
 }
 describe("server operation feedback", () => {
   it("shows conflicts and local account pause without offering completed retries", async () => {
@@ -133,6 +142,7 @@ describe("server operation feedback", () => {
         .click(),
     );
     expect(host.textContent).not.toContain("storage unavailable");
+    await expand();
     expect(host.textContent).toContain("Fixture");
   });
 });

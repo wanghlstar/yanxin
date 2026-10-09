@@ -1378,6 +1378,7 @@ export default function App() {
                     </CollapsibleTrigger>
                     <CollapsibleContent>
                       {[...group.folders]
+                        .filter((f) => f.count > 0)
                         .sort(
                           (a, b) =>
                             // 与"我的账号"的服务器文件夹顺序一致
@@ -1742,29 +1743,38 @@ export default function App() {
                   App、睡眠或断网时暂停。邮件须在服务器删除前完整下载。
                 </span>
               </div>
-              <div className="section-title">
-                <h3>最近活动</h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void refresh()}
-                >
-                  <RefreshCw size={14} />
-                  刷新
-                </Button>
-              </div>
-              <div className="activity-list">
-                {data.logs.length ? (
-                  data.logs.map((l, i) => (
-                    <p key={i}>
-                      <Check size={13} />
-                      {l}
-                    </p>
-                  ))
-                ) : (
-                  <p>连接邮箱后，这里会显示收取和规则执行记录。</p>
-                )}
-              </div>
+              <Collapsible defaultOpen={false} className="activity-section">
+                <div className="section-title">
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" size="sm" className="gap-1 px-0">
+                      <ChevronRight size={14} className="collapse-chevron" />
+                      <h3>最近活动</h3>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void refresh()}
+                  >
+                    <RefreshCw size={14} />
+                    刷新
+                  </Button>
+                </div>
+                <CollapsibleContent>
+                  <div className="activity-list">
+                    {data.logs.length ? (
+                      data.logs.slice(0, 15).map((l, i) => (
+                        <p key={i}>
+                          <Check size={13} />
+                          {l}
+                        </p>
+                      ))
+                    ) : (
+                      <p>连接邮箱后，这里会显示收取和规则执行记录。</p>
+                    )}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
               <div className="dev-note">
                 <span>
                   雁信 {updates.version} ·{" "}
@@ -2158,16 +2168,28 @@ export default function App() {
                         size="sm"
                         className="w-full justify-start"
                         onClick={() => {
+                          // 按邮件实际状态决定删除/恢复，避免多视图间来回踢
+                          const anyTrashed = rowMenu.ids.some((id) => {
+                            const m =
+                              data.messages.find((x) => x.id === id) ??
+                              (detail?.mail.id === id ? detail.mail : null);
+                            return m?.trashed === true;
+                          });
                           void mutate(
                             rowMenu.ids,
                             "trash",
-                            query.view === "trash" ? "false" : "true",
+                            anyTrashed ? "false" : "true",
                             rowMenu.threads,
                           );
                           setRowMenu(null);
                         }}
                       >
-                        {query.view === "trash"
+                        {rowMenu.ids.some((id) => {
+                          const m =
+                            data.messages.find((x) => x.id === id) ??
+                            (detail?.mail.id === id ? detail.mail : null);
+                          return m?.trashed === true;
+                        })
                           ? "从废纸篓恢复"
                           : "移到本地废纸篓"}
                       </Button>
