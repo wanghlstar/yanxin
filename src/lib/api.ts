@@ -19,6 +19,31 @@ import { parseAddresses } from "./addresses";
 import type { Address, Contact, OutboxRecord } from "./types";
 export const native = isTauri();
 const key = "mail-desktop-demo-v1";
+// 「全部」视图聚合所有收信文件夹，排除 已发送/草稿/垃圾/废纸篓/所有邮件（与 Rust 角色口径对齐的常规名）
+const demoSpecialFolders = new Set([
+  "Sent",
+  "Sent Messages",
+  "Sent Items",
+  "Sent Mail",
+  "Drafts",
+  "Draft",
+  "Trash",
+  "Deleted Messages",
+  "Deleted Items",
+  "Junk",
+  "Junk Email",
+  "Spam",
+  "All Mail",
+  "已发送",
+  "已发送邮件",
+  "草稿",
+  "草稿箱",
+  "垃圾邮件",
+  "垃圾箱",
+  "废纸篓",
+  "已删除",
+  "已删除邮件",
+]);
 let demo: Snapshot | null = null;
 export function isDemo() {
   return demo !== null;
@@ -67,7 +92,7 @@ export async function snapshot(query: Query): Promise<Snapshot> {
         (!query.unreadOnly || !m.isRead) &&
         (!query.starredOnly || m.starred) &&
         (!query.attachmentsOnly || m.hasAttachments) &&
-        (query.view !== "all" || m.sourceFolder.toUpperCase() === "INBOX") &&
+        (query.view !== "all" || !demoSpecialFolders.has(m.sourceFolder)) &&
         (query.view !== "unread" || !m.isRead) &&
         (query.view !== "starred" || m.starred) &&
         (query.view !== "sent" || m.sourceFolder === "Sent") &&

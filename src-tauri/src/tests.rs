@@ -748,6 +748,21 @@ fn unread_filter_preserves_mailbox_category_account_and_search_scope() {
         m.local_folder = folder.into();
         s.update_mail(&m).unwrap();
     }
+    // 「全部」按文件夹角色聚合：收信文件夹放行，已发送等特殊角色排除。
+    s.save_remote_folders(
+        &a.id,
+        &[
+            mapping_folder(&a, "INBOX", vec![FolderRole::Inbox]),
+            mapping_folder(&a, "Archive", vec![FolderRole::Archive]),
+            mapping_folder(&a, "Sent", vec![FolderRole::Sent]),
+        ],
+    )
+    .unwrap();
+    s.save_remote_folders(
+        &b.id,
+        &[mapping_folder(&b, "INBOX", vec![FolderRole::Inbox])],
+    )
+    .unwrap();
     s.reconcile_folder(
         &a.id,
         "INBOX",
@@ -759,9 +774,9 @@ fn unread_filter_preserves_mailbox_category_account_and_search_scope() {
     )
     .unwrap();
     for (view, folder, account_id, search, expected) in [
-        ("all", "", "", "", vec!["inbox-unread", "other-unread"]),
-        ("all", "", a.id.as_str(), "", vec!["inbox-unread"]),
-        ("all", "", "", "archive", vec![]),
+        ("all", "", "", "", vec!["archive-unread", "inbox-unread", "other-unread"]),
+        ("all", "", a.id.as_str(), "", vec!["archive-unread", "inbox-unread"]),
+        ("all", "", "", "archive", vec!["archive-unread"]),
         ("local", "", "", "archive", vec!["archive-unread"]),
         (
             "local",
@@ -798,6 +813,46 @@ fn unread_filter_preserves_mailbox_category_account_and_search_scope() {
         q.unread_only = false;
         assert!(s.snapshot(&q).unwrap().matched >= snap.matched);
     }
+}
+
+#[test]
+fn all_view_collects_every_received_folder_and_excludes_special_roles() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = Store::new(dir.path().into()).unwrap();
+    let a = account();
+    s.save_account(&a).unwrap();
+    for (name, folder) in [
+        ("inbox-mail", "INBOX"),
+        ("work-mail", "Work"),
+        ("sent-mail", "Sent"),
+        ("drafts-mail", "Drafts"),
+        ("junk-mail", "Junk"),
+        ("trash-mail", "Trash"),
+        ("allmail-mail", "AllMail"),
+    ] {
+        let raw = format!("From: test@example.com\r\nSubject: {name}\r\n\r\nAggregate test");
+        s.ingest(&a, folder, name, raw.as_bytes(), false).unwrap();
+    }
+    s.save_remote_folders(
+        &a.id,
+        &[
+            mapping_folder(&a, "INBOX", vec![FolderRole::Inbox]),
+            mapping_folder(&a, "Work", vec![]),
+            mapping_folder(&a, "Sent", vec![FolderRole::Sent]),
+            mapping_folder(&a, "Drafts", vec![FolderRole::Drafts]),
+            mapping_folder(&a, "Junk", vec![FolderRole::Junk]),
+            mapping_folder(&a, "Trash", vec![FolderRole::Trash]),
+            mapping_folder(&a, "AllMail", vec![FolderRole::All]),
+        ],
+    )
+    .unwrap();
+    let mut q = query();
+    q.view = "all".into();
+    let snap = s.snapshot(&q).unwrap();
+    let mut subjects: Vec<_> = snap.messages.iter().map(|m| m.subject.as_str()).collect();
+    subjects.sort_unstable();
+    assert_eq!(subjects, vec!["inbox-mail", "work-mail"]);
+    assert_eq!(snap.matched, 2);
 }
 
 #[test]
@@ -1242,8 +1297,9 @@ fn conversation_combines_inbox_and_sent_with_scope_pagination_and_old_archive_up
     q.limit = 10;
     q.view = "all".into();
     let inbox = store.snapshot(&q).unwrap();
-    assert_eq!(inbox.matched, 2);
-    assert_eq!(inbox.messages[1].id, turns[0].id);
+    // 未登记角色的文件夹按收信文件夹聚合，Sent 副本同样进入「全部」视图。
+    assert_eq!(inbox.matched, 3);
+    assert_eq!(inbox.messages[1].id, turns[1].id);
     q.search = "Latest".into();
     assert_eq!(store.snapshot(&q).unwrap().matched, 1);
     assert_eq!(store.snapshot(&q).unwrap().messages[0].id, turns[2].id);

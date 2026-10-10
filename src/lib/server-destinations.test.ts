@@ -26,8 +26,11 @@ describe("source and special-use destination decisions", () => {
     expect(() => directorySource(mail, ["A", "B"], [], "local")).toThrow(
       "多个服务器来源",
     );
-    expect(() => directorySource(mail, ["A"], [], "all")).toThrow(
-      "收件箱来源已失效",
+    // "all" is an aggregated view: fall back to the canonical inbox, then
+    // the mail's recorded source, then the single available source.
+    expect(directorySource(mail, ["A"], [], "all")).toBe("A");
+    expect(directorySource(mail, ["OldRoot", "INBOX"], [], "all")).toBe(
+      "INBOX",
     );
     expect(() =>
       directorySource(

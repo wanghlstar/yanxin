@@ -28,6 +28,7 @@ import { RemoteFolderList } from "./components/remote-folder-list";
 import { remoteFolderLabel, compareFolders } from "./lib/remote-folders";
 import { coalesceRefresh } from "./lib/refresh-queue";
 import { ConversationReader } from "./components/conversation-reader";
+import { ScrollPane } from "./components/scroll-pane";
 import { replyHeaders } from "./lib/conversations";
 import { FolderInput } from "./components/folder-input";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
@@ -1162,6 +1163,18 @@ export default function App() {
     : query.view === "all" || query.view === "unread"
       ? scopedUnread.reduce((sum, f) => sum + f.count, 0)
       : 0;
+  // 「全部」聚合所有收信文件夹（排除 草稿/已发送/垃圾/所有邮件），与视图口径一致
+  const specialFolders = new Set(
+    (data.remoteFolders ?? [])
+      .filter((f) =>
+        (f.roles ?? []).some((r) =>
+          ["sent", "drafts", "trash", "junk", "all"].includes(r),
+        ),
+      )
+      .map((f) => `${f.accountId}\u0000${f.name}`),
+  );
+  const isReceivedFolder = (f: { accountId: string; folder: string }) =>
+    !specialFolders.has(`${f.accountId}\u0000${f.folder}`);
   const scopedTotals = (data.folderTotals ?? []).filter(
     (f) =>
       (!query.accountId || f.accountId === query.accountId) &&
@@ -1171,11 +1184,11 @@ export default function App() {
     ? (scopedTotals[0]?.count ?? 0)
     : query.view === "all" || query.view === "unread"
       ? scopedTotals
-          .filter((f) => f.folder.toUpperCase() === "INBOX")
+          .filter(isReceivedFolder)
           .reduce((sum, f) => sum + f.count, 0)
       : 0;
   const inboxTotal = (data.folderTotals ?? [])
-    .filter((f) => f.folder.toUpperCase() === "INBOX")
+    .filter(isReceivedFolder)
     .reduce((sum, f) => sum + f.count, 0);
   const allUnread = unreadTotal.reduce((sum, f) => sum + f.count, 0);
   const nav = (
@@ -1258,282 +1271,297 @@ export default function App() {
                 写邮件<kbd>⌘ N</kbd>
               </Button>
             </SidebarHeader>
-            <SidebarContent className="sidebar">
-              <nav className="primary-nav">
-                {nav("all", Inbox, inboxTotal, allUnread)}
-                {nav("starred", Star)}
-                {nav("sent", Send)}
-                <Button
-                  variant="ghost"
-                  className={`nav-item ${page === "drafts" ? "active" : ""}`}
-                  onClick={() => void showDrafts()}
-                >
-                  <FileText size={17} />
-                  <span>草稿箱</span>
-                </Button>
-                <Button
-                  variant="ghost"
-                  className={`nav-item ${page === "outbox" ? "active" : ""}`}
-                  onClick={() => setPage("outbox")}
-                >
-                  <History size={17} />
-                  <span>发送记录</span>
-                </Button>
-              </nav>
-              <div className="nav-section-heading">
-                <span>我的账号</span>
-                <Button
-                  variant="ghost"
-                  title="添加邮箱账号"
-                  onClick={() => setAccountDialog(true)}
-                >
-                  <Plus size={15} />
-                </Button>
-              </div>
-              <div className="account-nav">
-                {data.accounts.map((a, i) => (
-                  <Collapsible
-                    key={a.id}
-                    open={expandedAccounts.includes(a.id)}
-                    onOpenChange={(open) => {
-                      setExpandedAccounts((ids) =>
-                        open ? [...ids, a.id] : ids.filter((id) => id !== a.id),
-                      );
-                      if (open) void loadFolders(a.id);
-                    }}
+            <SidebarContent className="sidebar sb-host">
+              <ScrollPane>
+                <nav className="primary-nav">
+                  {nav("all", Inbox, inboxTotal, allUnread)}
+                  {nav("starred", Star)}
+                  {nav("sent", Send)}
+                  <Button
+                    variant="ghost"
+                    className={`nav-item ${page === "drafts" ? "active" : ""}`}
+                    onClick={() => void showDrafts()}
                   >
-                    <div
-                      className={`account-navigation ${page === "mail" && query.accountId === a.id ? "active" : ""}`}
+                    <FileText size={17} />
+                    <span>草稿箱</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    className={`nav-item ${page === "outbox" ? "active" : ""}`}
+                    onClick={() => setPage("outbox")}
+                  >
+                    <History size={17} />
+                    <span>发送记录</span>
+                  </Button>
+                </nav>
+                <div className="nav-section-heading">
+                  <span>我的账号</span>
+                  <Button
+                    variant="ghost"
+                    title="添加邮箱账号"
+                    onClick={() => setAccountDialog(true)}
+                  >
+                    <Plus size={15} />
+                  </Button>
+                </div>
+                <div className="account-nav">
+                  {data.accounts.map((a, i) => (
+                    <Collapsible
+                      key={a.id}
+                      open={expandedAccounts.includes(a.id)}
+                      onOpenChange={(open) => {
+                        setExpandedAccounts((ids) =>
+                          open
+                            ? [...ids, a.id]
+                            : ids.filter((id) => id !== a.id),
+                        );
+                        if (open) void loadFolders(a.id);
+                      }}
                     >
-                      <Button
-                        variant="ghost"
-                        className="nav-item account-item"
-                        onClick={() => {
-                          // 点击账号名即折叠/展开（与右侧箭头一致）
-                          const open = !expandedAccounts.includes(a.id);
-                          setExpandedAccounts((ids) =>
-                            open
-                              ? [...ids, a.id]
-                              : ids.filter((id) => id !== a.id),
-                          );
-                          if (open) void loadFolders(a.id);
-                        }}
+                      <div
+                        className={`account-navigation ${page === "mail" && query.accountId === a.id ? "active" : ""}`}
                       >
-                        <span
-                          className={`account-dot ${
-                            a.error || !a.enabled ? "offline" : "online"
-                          }`}
-                        />
-                        <span>
-                          {a.name}
-                          <small>{a.email}</small>
-                        </span>
-                        {!a.enabled && <span className="paused-dot" />}
-                      </Button>
-                      {a.error && (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`${a.name} 收取异常`}
+                        <Button
+                          variant="ghost"
+                          className="nav-item account-item"
+                          onClick={() => {
+                            // 点击账号名即折叠/展开（与右侧箭头一致）
+                            const open = !expandedAccounts.includes(a.id);
+                            setExpandedAccounts((ids) =>
+                              open
+                                ? [...ids, a.id]
+                                : ids.filter((id) => id !== a.id),
+                            );
+                            if (open) void loadFolders(a.id);
+                          }}
+                        >
+                          <span
+                            className={`account-dot ${
+                              a.error || !a.enabled ? "offline" : "online"
+                            }`}
+                          />
+                          <span>
+                            {a.name}
+                            <small>{a.email}</small>
+                          </span>
+                          {!a.enabled && <span className="paused-dot" />}
+                        </Button>
+                        {a.error && (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label={`${a.name} 收取异常`}
+                              >
+                                <AlertCircle
+                                  size={14}
+                                  className="text-destructive"
+                                />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent
+                              side="right"
+                              className="max-w-80 break-words"
                             >
-                              <AlertCircle
-                                size={14}
-                                className="text-destructive"
-                              />
-                            </Button>
-                          </TooltipTrigger>
-                          <TooltipContent
-                            side="right"
-                            className="max-w-80 break-words"
+                              <p>{a.email}</p>
+                              <p>{friendlyError(a.error)}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                        <CollapsibleTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={`展开 ${a.name} 的服务器文件夹`}
+                            title="服务器文件夹"
                           >
-                            <p>{a.email}</p>
-                            <p>{friendlyError(a.error)}</p>
-                          </TooltipContent>
-                        </Tooltip>
-                      )}
-                      <CollapsibleTrigger asChild>
+                            <ChevronRight
+                              size={13}
+                              className={
+                                expandedAccounts.includes(a.id)
+                                  ? "rotate-90"
+                                  : ""
+                              }
+                            />
+                          </Button>
+                        </CollapsibleTrigger>
                         <Button
                           variant="ghost"
                           size="icon-sm"
-                          aria-label={`展开 ${a.name} 的服务器文件夹`}
-                          title="服务器文件夹"
+                          aria-label={`在 ${a.name} 新建文件夹`}
+                          title="新建服务器文件夹"
+                          onClick={() => {
+                            setFolderDialog({
+                              accountId: a.id,
+                              mode: "create",
+                            });
+                            setFolderName("");
+                          }}
                         >
-                          <ChevronRight
-                            size={13}
-                            className={
-                              expandedAccounts.includes(a.id) ? "rotate-90" : ""
-                            }
-                          />
+                          <FolderPlus size={13} />
                         </Button>
-                      </CollapsibleTrigger>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`在 ${a.name} 新建文件夹`}
-                        title="新建服务器文件夹"
-                        onClick={() => {
-                          setFolderDialog({ accountId: a.id, mode: "create" });
-                          setFolderName("");
-                        }}
-                      >
-                        <FolderPlus size={13} />
-                      </Button>
-                    </div>
-                    <CollapsibleContent className="remote-folder-list">
-                      {folderLoading.includes(a.id) &&
-                        !serverFolders.some((f) => f.accountId === a.id) && (
-                          <div role="status" aria-label="正在加载服务器文件夹">
-                            <Skeleton className="h-6 mb-2" />
-                            <Skeleton className="h-6" />
-                          </div>
-                        )}
-                      {folderErrors[a.id] && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void loadFolders(a.id)}
-                        >
-                          加载失败，重试
-                        </Button>
-                      )}
-                      <RemoteFolderList
-                        folders={serverFolders.filter(
-                          (f) => f.accountId === a.id,
-                        )}
-                        selected={
-                          query.accountId === a.id
-                            ? query.remoteFolder || ""
-                            : ""
-                        }
-                        onSelect={(name) => void openRemoteFolder(a.id, name)}
-                        onDelete={(name) =>
-                          setFolderDialog({
-                            accountId: a.id,
-                            mode: "delete",
-                            name,
-                          })
-                        }
-                        unreadCounts={Object.fromEntries(
-                          (data.folderUnread ?? [])
-                            .filter((u) => u.accountId === a.id)
-                            .map((u) => [u.folder, u.count]),
-                        )}
-                      />
-                    </CollapsibleContent>
-                  </Collapsible>
-                ))}
-                {!data.accounts.length && (
-                  <Button
-                    variant="ghost"
-                    className="add-account-dashed"
-                    onClick={() => setAccountDialog(true)}
-                  >
-                    <Plus size={14} />
-                    连接你的第一个邮箱
-                  </Button>
-                )}
-              </div>
-              <div className="nav-section-heading">
-                <span>保存在这台 Mac</span>
-                <HardDrive size={13} />
-              </div>
-              <Button
-                variant="ghost"
-                className={`nav-item ${
-                  page === "mail" &&
-                  query.view === "local" &&
-                  !query.accountId &&
-                  !query.folder
-                    ? "active"
-                    : ""
-                }`}
-                onClick={() => {
-                  navigate("local");
-                  // 整体隐藏/显示账号组；各账号内文件夹的展开状态保持不变
-                  setArchiveTreeHidden((v) => !v);
-                }}
-              >
-                <Archive size={17} />
-                <span>本地存档</span>
-                {!!data.stats.saved && <em>{data.stats.saved}</em>}
-              </Button>
-              {!archiveTreeHidden &&
-                archiveTree.map((group) => (
-                  <Collapsible
-                    key={group.accountId}
-                    open={!!archiveOpen[group.accountId]}
-                    onOpenChange={(open) =>
-                      setArchiveOpen((o) => ({ ...o, [group.accountId]: open }))
-                    }
-                  >
-                    <CollapsibleTrigger className="nav-item folder-item">
-                      <MailIcon size={16} />
-                      <span>{group.accountEmail || group.accountId}</span>
-                      <ChevronDown size={14} />
-                    </CollapsibleTrigger>
-                    <CollapsibleContent>
-                      {[...group.folders]
-                        .filter((f) => f.count > 0)
-                        .sort((a, b) =>
-                          // 与"我的账号"的文件夹树同一套排序（角色+中文拼音）
-                          compareFolders(
-                            {
-                              name: a.name,
-                              displayName: a.displayName || a.name,
-                              roles: serverFolders.find(
-                                (x) =>
-                                  x.accountId === group.accountId &&
-                                  x.name === a.name,
-                              )?.roles,
-                            },
-                            {
-                              name: b.name,
-                              displayName: b.displayName || b.name,
-                              roles: serverFolders.find(
-                                (x) =>
-                                  x.accountId === group.accountId &&
-                                  x.name === b.name,
-                              )?.roles,
-                            },
-                          ),
-                        )
-                        .map((f) => (
+                      </div>
+                      <CollapsibleContent className="remote-folder-list">
+                        {folderLoading.includes(a.id) &&
+                          !serverFolders.some((f) => f.accountId === a.id) && (
+                            <div
+                              role="status"
+                              aria-label="正在加载服务器文件夹"
+                            >
+                              <Skeleton className="h-6 mb-2" />
+                              <Skeleton className="h-6" />
+                            </div>
+                          )}
+                        {folderErrors[a.id] && (
                           <Button
                             variant="ghost"
-                            key={f.name}
-                            className={`nav-item folder-item nested ${
-                              query.view === "local" &&
-                              query.accountId === group.accountId &&
-                              query.remoteFolder === f.name
-                                ? "active"
-                                : ""
-                            }`}
-                            onClick={() =>
-                              navigate("local", group.accountId, "", f.name)
-                            }
+                            size="sm"
+                            onClick={() => void loadFolders(a.id)}
                           >
-                            <Folder size={15} />
-                            <span>{f.displayName || f.name}</span>
-                            {!!f.count && <em>{f.count}</em>}
+                            加载失败，重试
                           </Button>
-                        ))}
-                    </CollapsibleContent>
-                  </Collapsible>
-                ))}
-              {data.folders.map((f) => (
+                        )}
+                        <RemoteFolderList
+                          folders={serverFolders.filter(
+                            (f) => f.accountId === a.id,
+                          )}
+                          selected={
+                            query.accountId === a.id
+                              ? query.remoteFolder || ""
+                              : ""
+                          }
+                          onSelect={(name) => void openRemoteFolder(a.id, name)}
+                          onDelete={(name) =>
+                            setFolderDialog({
+                              accountId: a.id,
+                              mode: "delete",
+                              name,
+                            })
+                          }
+                          unreadCounts={Object.fromEntries(
+                            (data.folderUnread ?? [])
+                              .filter((u) => u.accountId === a.id)
+                              .map((u) => [u.folder, u.count]),
+                          )}
+                        />
+                      </CollapsibleContent>
+                    </Collapsible>
+                  ))}
+                  {!data.accounts.length && (
+                    <Button
+                      variant="ghost"
+                      className="add-account-dashed"
+                      onClick={() => setAccountDialog(true)}
+                    >
+                      <Plus size={14} />
+                      连接你的第一个邮箱
+                    </Button>
+                  )}
+                </div>
+                <div className="nav-section-heading">
+                  <span>保存在这台 Mac</span>
+                  <HardDrive size={13} />
+                </div>
                 <Button
                   variant="ghost"
-                  key={f}
-                  className={`nav-item folder-item ${query.folder === f && page === "mail" ? "active" : ""}`}
-                  onClick={() => navigate("local", "", f)}
+                  className={`nav-item ${
+                    page === "mail" &&
+                    query.view === "local" &&
+                    !query.accountId &&
+                    !query.folder
+                      ? "active"
+                      : ""
+                  }`}
+                  onClick={() => {
+                    navigate("local");
+                    // 整体隐藏/显示账号组；各账号内文件夹的展开状态保持不变
+                    setArchiveTreeHidden((v) => !v);
+                  }}
                 >
-                  <Folder size={16} />
-                  <span>{f}</span>
+                  <Archive size={17} />
+                  <span>本地存档</span>
+                  {!!data.stats.saved && <em>{data.stats.saved}</em>}
                 </Button>
-              ))}
-              {nav("trash", Trash2)}
+                {!archiveTreeHidden &&
+                  archiveTree.map((group) => (
+                    <Collapsible
+                      key={group.accountId}
+                      open={!!archiveOpen[group.accountId]}
+                      onOpenChange={(open) =>
+                        setArchiveOpen((o) => ({
+                          ...o,
+                          [group.accountId]: open,
+                        }))
+                      }
+                    >
+                      <CollapsibleTrigger className="nav-item folder-item">
+                        <MailIcon size={16} />
+                        <span>{group.accountEmail || group.accountId}</span>
+                        <ChevronDown size={14} />
+                      </CollapsibleTrigger>
+                      <CollapsibleContent>
+                        {[...group.folders]
+                          .filter((f) => f.count > 0)
+                          .sort((a, b) =>
+                            // 与"我的账号"的文件夹树同一套排序（角色+中文拼音）
+                            compareFolders(
+                              {
+                                name: a.name,
+                                displayName: a.displayName || a.name,
+                                roles: serverFolders.find(
+                                  (x) =>
+                                    x.accountId === group.accountId &&
+                                    x.name === a.name,
+                                )?.roles,
+                              },
+                              {
+                                name: b.name,
+                                displayName: b.displayName || b.name,
+                                roles: serverFolders.find(
+                                  (x) =>
+                                    x.accountId === group.accountId &&
+                                    x.name === b.name,
+                                )?.roles,
+                              },
+                            ),
+                          )
+                          .map((f) => (
+                            <Button
+                              variant="ghost"
+                              key={f.name}
+                              className={`nav-item folder-item nested ${
+                                query.view === "local" &&
+                                query.accountId === group.accountId &&
+                                query.remoteFolder === f.name
+                                  ? "active"
+                                  : ""
+                              }`}
+                              onClick={() =>
+                                navigate("local", group.accountId, "", f.name)
+                              }
+                            >
+                              <Folder size={15} />
+                              <span>{f.displayName || f.name}</span>
+                              {!!f.count && <em>{f.count}</em>}
+                            </Button>
+                          ))}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  ))}
+                {data.folders.map((f) => (
+                  <Button
+                    variant="ghost"
+                    key={f}
+                    className={`nav-item folder-item ${query.folder === f && page === "mail" ? "active" : ""}`}
+                    onClick={() => navigate("local", "", f)}
+                  >
+                    <Folder size={16} />
+                    <span>{f}</span>
+                  </Button>
+                ))}
+                {nav("trash", Trash2)}
+              </ScrollPane>
             </SidebarContent>
             <SidebarFooter className="mail-sidebar-footer">
               <div className="sidebar-bottom">
@@ -2351,144 +2379,147 @@ export default function App() {
                       </Button>
                     </div>
                   )}
-                  <div className="mail-rows">
-                    {loading ? (
-                      <MailListSkeleton />
-                    ) : data.messages.length ? (
-                      data.messages.map((m, rowIndex) => (
-                        <div
-                          key={m.id}
-                          className={`mail-row ${selected === m.id || (grouped && !!m.conversationId && m.conversationId === detail?.mail.conversationId) ? "selected" : ""} ${!m.isRead ? "unread" : ""}`}
-                          onContextMenu={(event) => {
-                            event.preventDefault();
-                            const keep =
-                              checked.includes(m.id) && checked.length > 1;
-                            if (!keep) setChecked([m.id]);
-                            setRowMenu({
-                              x: event.clientX,
-                              y: event.clientY,
-                              ids: keep ? checked : [m.id],
-                              threads: grouped,
-                            });
-                          }}
-                        >
-                          <div className="row-check">
-                            <Checkbox
-                              aria-label={`选择 ${m.subject}`}
-                              checked={checked.includes(m.id)}
-                              onCheckedChange={(v) => {
-                                lastRowIndex.current = rowIndex;
-                                setChecked((ids) =>
-                                  v
-                                    ? [...ids, m.id]
-                                    : ids.filter((id) => id !== m.id),
-                                );
-                              }}
-                            />
-                          </div>
-                          <Button
-                            variant="ghost"
-                            className="mail-row-main"
-                            onClick={(event) => {
-                              // Shift+点击：从上次行到本行范围勾选
-                              if (
-                                event.shiftKey &&
-                                lastRowIndex.current >= 0 &&
-                                lastRowIndex.current !== rowIndex
-                              ) {
-                                const from = Math.min(
-                                  lastRowIndex.current,
-                                  rowIndex,
-                                );
-                                const to = Math.max(
-                                  lastRowIndex.current,
-                                  rowIndex,
-                                );
-                                const range = data.messages
-                                  .slice(from, to + 1)
-                                  .map((item) => item.id);
-                                setChecked((ids) =>
-                                  Array.from(new Set([...ids, ...range])),
-                                );
-                                return;
-                              }
-                              lastRowIndex.current = rowIndex;
-                              void openMail(m);
+                  <div className="mail-rows sb-host">
+                    <ScrollPane>
+                      {loading ? (
+                        <MailListSkeleton />
+                      ) : data.messages.length ? (
+                        data.messages.map((m, rowIndex) => (
+                          <div
+                            key={m.id}
+                            className={`mail-row ${selected === m.id || (grouped && !!m.conversationId && m.conversationId === detail?.mail.conversationId) ? "selected" : ""} ${!m.isRead ? "unread" : ""}`}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              const keep =
+                                checked.includes(m.id) && checked.length > 1;
+                              if (!keep) setChecked([m.id]);
+                              setRowMenu({
+                                x: event.clientX,
+                                y: event.clientY,
+                                ids: keep ? checked : [m.id],
+                                threads: grouped,
+                              });
                             }}
                           >
-                            <div className="row-top">
-                              <span className="sender-name">
-                                {senderName(m.sender)}
-                              </span>
-                              <time>{time(m.date)}</time>
-                            </div>
-                            <div className="row-subject">
-                              {!m.isRead && <i />}
-                              {m.subject}
-                              {grouped && (m.conversationCount || 0) > 1 && (
-                                <Badge
-                                  variant="secondary"
-                                  className="conversation-count"
-                                >
-                                  {m.conversationCount}
-                                </Badge>
-                              )}
-                            </div>
-                            <p>{m.preview}</p>
-                            <div className="row-meta">
-                              <span
-                                className={`mini-dot color-${data.accounts.findIndex((a) => a.id === m.accountId) % 4}`}
+                            <div className="row-check">
+                              <Checkbox
+                                aria-label={`选择 ${m.subject}`}
+                                checked={checked.includes(m.id)}
+                                onCheckedChange={(v) => {
+                                  lastRowIndex.current = rowIndex;
+                                  setChecked((ids) =>
+                                    v
+                                      ? [...ids, m.id]
+                                      : ids.filter((id) => id !== m.id),
+                                  );
+                                }}
                               />
-                              <span>
-                                {data.accounts.find((a) => a.id === m.accountId)
-                                  ?.name || "已移除账号"}
-                              </span>
-                              {m.localFolder !== "全部存档" && (
-                                <small>{m.localFolder}</small>
-                              )}
-                              {m.hasAttachments && <Paperclip size={12} />}
-                              <span className="row-spacer" />
-                              {m.starred && (
-                                <Star size={13} className="star-on" />
-                              )}
                             </div>
-                          </Button>
+                            <Button
+                              variant="ghost"
+                              className="mail-row-main"
+                              onClick={(event) => {
+                                // Shift+点击：从上次行到本行范围勾选
+                                if (
+                                  event.shiftKey &&
+                                  lastRowIndex.current >= 0 &&
+                                  lastRowIndex.current !== rowIndex
+                                ) {
+                                  const from = Math.min(
+                                    lastRowIndex.current,
+                                    rowIndex,
+                                  );
+                                  const to = Math.max(
+                                    lastRowIndex.current,
+                                    rowIndex,
+                                  );
+                                  const range = data.messages
+                                    .slice(from, to + 1)
+                                    .map((item) => item.id);
+                                  setChecked((ids) =>
+                                    Array.from(new Set([...ids, ...range])),
+                                  );
+                                  return;
+                                }
+                                lastRowIndex.current = rowIndex;
+                                void openMail(m);
+                              }}
+                            >
+                              <div className="row-top">
+                                <span className="sender-name">
+                                  {senderName(m.sender)}
+                                </span>
+                                <time>{time(m.date)}</time>
+                              </div>
+                              <div className="row-subject">
+                                {!m.isRead && <i />}
+                                {m.subject}
+                                {grouped && (m.conversationCount || 0) > 1 && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="conversation-count"
+                                  >
+                                    {m.conversationCount}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p>{m.preview}</p>
+                              <div className="row-meta">
+                                <span
+                                  className={`mini-dot color-${data.accounts.findIndex((a) => a.id === m.accountId) % 4}`}
+                                />
+                                <span>
+                                  {data.accounts.find(
+                                    (a) => a.id === m.accountId,
+                                  )?.name || "已移除账号"}
+                                </span>
+                                {m.localFolder !== "全部存档" && (
+                                  <small>{m.localFolder}</small>
+                                )}
+                                {m.hasAttachments && <Paperclip size={12} />}
+                                <span className="row-spacer" />
+                                {m.starred && (
+                                  <Star size={13} className="star-on" />
+                                )}
+                              </div>
+                            </Button>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="list-empty">
+                          <Inbox size={30} />
+                          <h3>
+                            {search
+                              ? "没有找到邮件"
+                              : data.accounts.length
+                                ? "这里很安静"
+                                : "收件箱准备好了"}
+                          </h3>
+                          <p>
+                            {search
+                              ? "试试其他关键词。"
+                              : data.accounts.length
+                                ? "点击上方刷新，收取新的邮件。"
+                                : "连接邮箱后，邮件会出现在这里。"}
+                          </p>
                         </div>
-                      ))
-                    ) : (
-                      <div className="list-empty">
-                        <Inbox size={30} />
-                        <h3>
-                          {search
-                            ? "没有找到邮件"
-                            : data.accounts.length
-                              ? "这里很安静"
-                              : "收件箱准备好了"}
-                        </h3>
-                        <p>
-                          {search
-                            ? "试试其他关键词。"
-                            : data.accounts.length
-                              ? "点击上方刷新，收取新的邮件。"
-                              : "连接邮箱后，邮件会出现在这里。"}
-                        </p>
-                      </div>
-                    )}
-                    {data.matched > data.messages.length && (
-                      <Button
-                        variant="ghost"
-                        className="load-more"
-                        onClick={() =>
-                          setQuery((q) => ({
-                            ...q,
-                            limit: Math.min(q.limit + 200, 5000),
-                          }))
-                        }
-                        disabled={query.limit >= 5000}
-                      >
-                        加载更多（{data.messages.length} / {data.matched}）
-                      </Button>
-                    )}
+                      )}
+                      {data.matched > data.messages.length && (
+                        <Button
+                          variant="ghost"
+                          className="load-more"
+                          onClick={() =>
+                            setQuery((q) => ({
+                              ...q,
+                              limit: Math.min(q.limit + 200, 5000),
+                            }))
+                          }
+                          disabled={query.limit >= 5000}
+                        >
+                          加载更多（{data.messages.length} / {data.matched}）
+                        </Button>
+                      )}
+                    </ScrollPane>
                   </div>
                 </section>
               }

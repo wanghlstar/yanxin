@@ -34,6 +34,7 @@ import { MailBodySkeleton } from "./mail-skeleton";
 import { Alert, AlertTitle, AlertDescription } from "./ui/alert";
 import { MailContent } from "./mail-content";
 import { MailAttachments } from "./mail-attachments";
+import { ScrollPane } from "./scroll-pane";
 import { call, newDraft } from "../lib/api";
 import { parseAddresses, replyRecipients } from "../lib/addresses";
 import { mailTime, replyHeaders } from "../lib/conversations";
@@ -605,62 +606,72 @@ export function ConversationReader({
       !selected.mail.references?.length)
   ) {
     return (
-      <div className="reader-scroll" id="mail-reader-content" ref={scrollRef}>
-        <ParseWarnings mail={selected.mail} />
-        {selected.html ? (
-          <MailContent html={selected.html} onOpenLink={onLink} />
-        ) : (
-          <div className="message-body">{selected.mail.body}</div>
-        )}
-        <MailAttachments
-          mailId={selected.mail.id}
-          demo={demo}
-          attachments={selected.attachments}
-          onDownload={(index, name) => onAttachment(selected.mail, index, name)}
-        />
+      <div className="sb-host">
+        <ScrollPane
+          className="reader-scroll"
+          id="mail-reader-content"
+          scrollerRef={scrollRef}
+        >
+          <ParseWarnings mail={selected.mail} />
+          {selected.html ? (
+            <MailContent html={selected.html} onOpenLink={onLink} />
+          ) : (
+            <div className="message-body">{selected.mail.body}</div>
+          )}
+          <MailAttachments
+            mailId={selected.mail.id}
+            demo={demo}
+            attachments={selected.attachments}
+            onDownload={(index, name) =>
+              onAttachment(selected.mail, index, name)
+            }
+          />
+        </ScrollPane>
       </div>
     );
   }
   return (
     <>
-      <div
-        className="reader-scroll conversation-scroll"
-        id="mail-reader-content"
-        ref={scrollRef}
-      >
-        <div className="conversation-stream" ref={stream}>
-          <div className="conversation-start">
-            <Badge variant="secondary">{messages.length} 封邮件</Badge>
-            <span>按时间排列</span>
-          </div>
-          {error && (
-            <div role="alert" className="turn-error">
-              对话加载失败
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setRetry((n) => n + 1)}
-              >
-                重新加载对话
-              </Button>
+      <div className="sb-host">
+        <ScrollPane
+          className="reader-scroll conversation-scroll"
+          id="mail-reader-content"
+          scrollerRef={scrollRef}
+        >
+          <div className="conversation-stream" ref={stream}>
+            <div className="conversation-start">
+              <Badge variant="secondary">{messages.length} 封邮件</Badge>
+              <span>按时间排列</span>
             </div>
-          )}
-          {messages.map((mail) => (
-            <Turn
-              key={mail.id}
-              mail={mail}
-              selected={mail.id === selected.mail.id ? selected : null}
-              own={own(mail)}
-              demo={demo}
-              onReply={onReply}
-              onExport={onExport}
-              onAttachment={onAttachment}
-              onAction={onAction}
-              onLink={onLink}
-              onLoaded={loaded}
-            />
-          ))}
-        </div>
+            {error && (
+              <div role="alert" className="turn-error">
+                对话加载失败
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setRetry((n) => n + 1)}
+                >
+                  重新加载对话
+                </Button>
+              </div>
+            )}
+            {messages.map((mail) => (
+              <Turn
+                key={mail.id}
+                mail={mail}
+                selected={mail.id === selected.mail.id ? selected : null}
+                own={own(mail)}
+                demo={demo}
+                onReply={onReply}
+                onExport={onExport}
+                onAttachment={onAttachment}
+                onAction={onAction}
+                onLink={onLink}
+                onLoaded={loaded}
+              />
+            ))}
+          </div>
+        </ScrollPane>
       </div>
       {newBelow && (
         <Button

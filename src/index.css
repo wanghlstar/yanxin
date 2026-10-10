@@ -131,7 +131,7 @@ kbd {
   background: var(--background);
 }
 .sidebar {
-  width: 238px;
+  width: 100%;
   flex-shrink: 0;
   background: var(--secondary);
   border-right: 1px solid var(--border);
@@ -530,7 +530,6 @@ button.nav-item {
 }
 .mail-rows {
   flex: 1;
-  overflow: auto;
 }
 .mail-row {
   display: flex;
@@ -722,6 +721,64 @@ button.nav-item {
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(134, 134, 139, 0.45) transparent;
+}
+/* 自定义细滚动条：原生 thin 无法再细，隐藏原生并用 3px 拇指（命中区 7px）替代 */
+.sb-host {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.sb-scroll {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  scrollbar-width: none;
+}
+/* 侧栏 sections 原本靠 SidebarContent 基类的 gap-2 拉开间距，包装后在这里补回 */
+.sidebar > .sb-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 1;
+}
+/* 继承原 .sidebar > * 的防收缩意图，避免子树在溢出时被压扁 */
+.sidebar > .sb-scroll > * {
+  flex-shrink: 0;
+}
+.sb-thumb {
+  position: absolute;
+  display: none;
+}
+.sb-thumb::before {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  border-radius: 2px;
+  background: rgba(134, 134, 139, 0.36);
+  transition: background 0.15s;
+}
+.sb-thumb:hover::before {
+  background: rgba(134, 134, 139, 0.48);
+}
+.sb-thumb:active::before {
+  background: rgba(134, 134, 139, 0.6);
+}
+.sb-host.sb-y > .sb-thumb-y {
+  display: block;
+  top: var(--sb-y-top, 0);
+  height: var(--sb-y-size, 0);
+  right: 4px;
+  width: 7px;
+}
+.sb-host.sb-x > .sb-thumb-x {
+  display: block;
+  left: var(--sb-x-left, 0);
+  width: var(--sb-x-size, 0);
+  bottom: 4px;
+  height: 7px;
 }
 .list-filters .tab-count {
   font-style: normal;
@@ -2207,7 +2264,6 @@ button.nav-item {
 }
 @media (max-width: 1180px) {
   .sidebar {
-    width: 211px;
     padding-left: 11px;
     padding-right: 11px;
   }
@@ -2310,7 +2366,7 @@ button.nav-item {
 }
 .sidebar {
   width: 100%;
-  padding: 8px;
+  padding: 8px 8px 4px;
   border: 0;
   gap: 0;
   background: transparent;
@@ -2371,7 +2427,7 @@ button.nav-item {
   font-size: 11px;
 }
 .nav-section-heading {
-  padding: 22px 8px 8px;
+  padding: 8px 8px 4px;
   font-size: 12px;
   letter-spacing: 0;
   color: var(--muted);
@@ -2564,7 +2620,7 @@ button.nav-item {
   margin-bottom: 4px;
 }
 .mail-sidebar-footer {
-  padding: 8px;
+  padding: 4px 8px 6px;
 }
 .mail-sidebar-footer .sidebar-bottom {
   padding-top: 0;
@@ -2790,10 +2846,6 @@ button.nav-item {
   width: 100%;
   height: 100%;
   border-right: 0;
-}
-/* 邮件列表右侧留间隙，让悬浮滚动条不顶到分隔条（参考侧栏做法） */
-.mail-list-panel {
-  padding-right: 6px;
 }
 .mail-reader-panel > .reader {
   width: 100%;
