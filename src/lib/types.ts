@@ -126,6 +126,7 @@ export interface Snapshot {
   dataDir: string;
   matched: number;
   remoteFolders?: RemoteFolder[];
+  folderUnread?: FolderUnread[];
 }
 export interface Detail {
   mail: Mail;
@@ -217,6 +218,11 @@ export interface TierInfo {
   pending: number;
   pendingBytes: number;
   externalReachable: boolean;
+}
+export interface FolderUnread {
+  accountId: string;
+  folder: string;
+  count: number;
 }
 export interface LocalArchiveFolder {
   name: string;

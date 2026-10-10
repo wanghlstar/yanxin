@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { AlertCircle, RefreshCw } from "lucide-react";
+import { AlertCircle, ChevronRight, RefreshCw } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "./ui/collapsible";
 import { toast } from "sonner";
 import { call, native, isDemo } from "@/lib/api";
 import { coalesceRefresh } from "@/lib/refresh-queue";
@@ -151,95 +156,113 @@ export function DirectoryOperationsPanel() {
             暂无服务器文件夹操作。
           </p>
         )}
-        <ul className="flex flex-col gap-4" aria-label="服务器文件夹任务">
-          {items?.map((item) => (
-            <li
-              key={item.id}
-              className="flex flex-wrap items-start justify-between gap-3"
+        <Collapsible defaultOpen={false}>
+          <CollapsibleTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-between"
             >
-              <div className="flex min-w-0 flex-col gap-1">
-                <p className="break-words">{item.subject || "（无主题）"}</p>
-                <p className="text-sm text-muted-foreground">
-                  {item.accountEmail} · {item.kind === "move" ? "移动" : "复制"}{" "}
-                  · {item.folder} → {item.target}
-                </p>
-                {item.receiptOrigin === "observed" &&
-                  item.status === "completed" && (
-                    <p className="text-sm text-muted-foreground">
-                      目标全文与原目录只读核查通过
+              任务（{Math.min(items?.length ?? 0, 50)} / {items?.length ?? 0}）
+              <ChevronRight size={14} className="collapse-chevron" />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul className="flex flex-col gap-4" aria-label="服务器文件夹任务">
+              {items?.map((item) => (
+                <li
+                  key={item.id}
+                  className="flex flex-wrap items-start justify-between gap-3"
+                >
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <p className="break-words">
+                      {item.subject || "（无主题）"}
                     </p>
-                  )}
-                {item.error && (
-                  <p className="text-sm text-destructive">{item.error}</p>
-                )}
-                {item.strategy === "copy-delete" && (
-                  <p className="text-sm text-muted-foreground">
-                    兼容移动 · 先核验目标，再移除原目录
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">
-                  {item.kind === "move" && item.status === "completed"
-                    ? "移动完成"
-                    : item.kind === "move" && item.status === "queued"
-                      ? "待移动"
-                      : statuses[item.status]}
-                </Badge>
-                {item.status === "blocked" && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!!busy}
-                    onClick={() => void action(item.id, "retry")}
-                  >
-                    重试
-                  </Button>
-                )}
-                {(item.status === "confirmed" ||
-                  item.status === "cleanup_uncertain" ||
-                  item.status === "cleanup_blocked" ||
-                  (item.kind === "move" && item.status === "uncertain")) && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={!!busy}
-                    onClick={() => void action(item.id, "verify")}
-                  >
-                    只读核对
-                  </Button>
-                )}
-                {item.kind === "move" &&
-                  item.strategy === "copy-delete" &&
-                  item.receipt &&
-                  [
-                    "confirmed",
-                    "cleanup_uncertain",
-                    "cleanup_blocked",
-                  ].includes(item.status) && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={!!busy}
-                      onClick={() => void action(item.id, "continue_move")}
-                    >
-                      继续移除原目录
-                    </Button>
-                  )}
-                {["queued", "blocked"].includes(item.status) && (
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    disabled={!!busy}
-                    onClick={() => void action(item.id, "cancel")}
-                  >
-                    取消任务
-                  </Button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+                    <p className="text-sm text-muted-foreground">
+                      {item.accountEmail} ·{" "}
+                      {item.kind === "move" ? "移动" : "复制"} · {item.folder} →{" "}
+                      {item.target}
+                    </p>
+                    {item.receiptOrigin === "observed" &&
+                      item.status === "completed" && (
+                        <p className="text-sm text-muted-foreground">
+                          目标全文与原目录只读核查通过
+                        </p>
+                      )}
+                    {item.error && (
+                      <p className="text-sm text-destructive">{item.error}</p>
+                    )}
+                    {item.strategy === "copy-delete" && (
+                      <p className="text-sm text-muted-foreground">
+                        兼容移动 · 先核验目标，再移除原目录
+                      </p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">
+                      {item.kind === "move" && item.status === "completed"
+                        ? "移动完成"
+                        : item.kind === "move" && item.status === "queued"
+                          ? "待移动"
+                          : statuses[item.status]}
+                    </Badge>
+                    {item.status === "blocked" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!!busy}
+                        onClick={() => void action(item.id, "retry")}
+                      >
+                        重试
+                      </Button>
+                    )}
+                    {(item.status === "confirmed" ||
+                      item.status === "cleanup_uncertain" ||
+                      item.status === "cleanup_blocked" ||
+                      (item.kind === "move" &&
+                        item.status === "uncertain")) && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!!busy}
+                        onClick={() => void action(item.id, "verify")}
+                      >
+                        只读核对
+                      </Button>
+                    )}
+                    {item.kind === "move" &&
+                      item.strategy === "copy-delete" &&
+                      item.receipt &&
+                      [
+                        "confirmed",
+                        "cleanup_uncertain",
+                        "cleanup_blocked",
+                      ].includes(item.status) && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!!busy}
+                          onClick={() => void action(item.id, "continue_move")}
+                        >
+                          继续移除原目录
+                        </Button>
+                      )}
+                    {["queued", "blocked"].includes(item.status) && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        disabled={!!busy}
+                        onClick={() => void action(item.id, "cancel")}
+                      >
+                        取消任务
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
       </CardContent>
     </Card>
   );

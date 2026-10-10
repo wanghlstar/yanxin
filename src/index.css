@@ -114,14 +114,14 @@ kbd {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--muted-foreground);
+  background: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
   border-radius: 6px;
   border: 3px solid transparent;
   background-clip: content-box;
   min-height: 32px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--foreground);
+  background: color-mix(in srgb, var(--muted-foreground) 75%, transparent);
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:active {

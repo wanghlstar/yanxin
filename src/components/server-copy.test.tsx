@@ -66,6 +66,11 @@ describe("directory task feedback", () => {
         }) as DirectoryOperation,
     );
     await act(async () => root.render(<DirectoryOperationsPanel />));
+    await act(async () => {
+      host
+        .querySelectorAll("button")
+        .forEach((b) => b.textContent?.startsWith("任务（") && b.click());
+    });
     const rows = host.querySelectorAll("li");
     expect(rows[0].textContent).toContain("待完成移动");
     expect(rows[0].querySelectorAll("button")).toHaveLength(0);
@@ -93,10 +98,20 @@ describe("directory task feedback", () => {
       receipt: { validity: 9, uid: 34 },
     };
     await act(async () => root.render(<DirectoryOperationsPanel />));
+    await act(async () => {
+      host
+        .querySelectorAll("button")
+        .forEach((b) => b.textContent?.startsWith("任务（") && b.click());
+    });
     expect(host.textContent).not.toContain("继续移除原目录");
   });
   it("offers only safe actions for each persisted state", async () => {
     await act(async () => root.render(<DirectoryOperationsPanel />));
+    await act(async () => {
+      host
+        .querySelectorAll("button")
+        .forEach((b) => b.textContent?.startsWith("任务（") && b.click());
+    });
     const rows = [...host.querySelectorAll("li")];
     expect(rows[0].textContent).toContain("结果未确认");
     expect(rows[0].querySelectorAll("button")).toHaveLength(0);
@@ -113,6 +128,11 @@ describe("directory task feedback", () => {
   });
   it("suppresses duplicate task actions and preserves errors after a reload", async () => {
     await act(async () => root.render(<DirectoryOperationsPanel />));
+    await act(async () => {
+      host
+        .querySelectorAll("button")
+        .forEach((b) => b.textContent?.startsWith("任务（") && b.click());
+    });
     let reject!: (e: Error) => void;
     vi.mocked(api.call).mockImplementationOnce(
       () =>
@@ -138,6 +158,11 @@ describe("directory task feedback", () => {
     items[0].kind = "move";
     items[4].kind = "move";
     await act(async () => root.render(<DirectoryOperationsPanel />));
+    await act(async () => {
+      host
+        .querySelectorAll("button")
+        .forEach((b) => b.textContent?.startsWith("任务（") && b.click());
+    });
     const rows = host.querySelectorAll("li");
     expect(rows[0].textContent).toContain("移动");
     expect(rows[0].querySelectorAll("button")).toHaveLength(1);

@@ -27,11 +27,13 @@ export function RemoteFolderList({
   selected,
   onSelect,
   onDelete,
+  unreadCounts,
 }: {
   folders: RemoteFolder[];
   selected: string;
   onSelect: (name: string) => void;
   onDelete?: (name: string) => void;
+  unreadCounts?: Record<string, number>;
 }) {
   const tree = useMemo(() => remoteFolderTree(folders), [folders]);
   return (
@@ -43,6 +45,7 @@ export function RemoteFolderList({
           selected={selected}
           onSelect={onSelect}
           onDelete={onDelete}
+          unreadCounts={unreadCounts}
         />
       ))}
     </div>
@@ -54,11 +57,13 @@ function FolderBranch({
   selected,
   onSelect,
   onDelete,
+  unreadCounts,
 }: {
   node: FolderNode;
   selected: string;
   onSelect: (name: string) => void;
   onDelete?: (name: string) => void;
+  unreadCounts?: Record<string, number>;
 }) {
   const containsSelected = (node: FolderNode): boolean =>
     node.folder?.name === selected || node.children.some(containsSelected);
@@ -113,6 +118,9 @@ function FolderBranch({
       >
         <Icon data-icon="inline-start" />
         <span>{node.label}</span>
+        {!!unreadCounts?.[node.folder?.name ?? ""] && (
+          <em>{unreadCounts[node.folder!.name]}</em>
+        )}
         {node.folder?.syncError && (
           <AlertCircle
             className="text-destructive"
@@ -148,6 +156,7 @@ function FolderBranch({
             selected={selected}
             onSelect={onSelect}
             onDelete={onDelete}
+            unreadCounts={unreadCounts}
           />
         ))}
       </CollapsibleContent>

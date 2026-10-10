@@ -1245,7 +1245,7 @@ impl Store {
         };
         let matched = messages.len() as u64;
         messages.truncate(q.limit.clamp(1, 5000) as usize);
-        let stats=db.query_row("SELECT COUNT(*),COALESCE(SUM(json_extract(data,'$.isRead')=0 AND json_extract(data,'$.trashed')=0),0),COALESCE(SUM(CASE WHEN COALESCE(json_extract(data,'$.savedLocally'),1)=1 THEN json_extract(data,'$.size') ELSE 0 END),0),COALESCE(SUM(COALESCE(json_extract(data,'$.savedLocally'),1)),0) FROM message_listing",[],|r|Ok(Stats{total:r.get(0)?,saved:r.get(3)?,unread:r.get(1)?,bytes:r.get(2)?})).map_err(err)?;
+        let stats=db.query_row("SELECT COUNT(*),COALESCE(SUM(CASE WHEN json_extract(data,'$.isRead')=0 AND json_extract(data,'$.trashed')=0 AND EXISTS(SELECT 1 FROM trusted_sources s WHERE s.mail_id=message_listing.id AND s.folder='INBOX' COLLATE NOCASE AND s.active=1) THEN 1 ELSE 0 END),0),COALESCE(SUM(CASE WHEN COALESCE(json_extract(data,'$.savedLocally'),1)=1 THEN json_extract(data,'$.size') ELSE 0 END),0),COALESCE(SUM(COALESCE(json_extract(data,'$.savedLocally'),1)),0) FROM message_listing",[],|r|Ok(Stats{total:r.get(0)?,saved:r.get(3)?,unread:r.get(1)?,bytes:r.get(2)?})).map_err(err)?;
         let mut fs=db.prepare("SELECT DISTINCT json_extract(data,'$.localFolder') FROM message_listing WHERE json_extract(data,'$.localFolder')!='全部存档' ORDER BY 1").map_err(err)?;
         let folders = fs
             .query_map([], |r| r.get(0))
@@ -1283,6 +1283,29 @@ impl Store {
             data_dir: self.root.to_string_lossy().into(),
             matched,
             remote_folders: self.remote_folders(None)?,
+            folder_unread: {
+                let mut q = db
+                    .prepare(
+                        "SELECT s.account_id, s.folder, COUNT(DISTINCT s.mail_id)
+                         FROM trusted_sources s JOIN messages m ON m.id = s.mail_id
+                         WHERE s.active=1 AND json_extract(m.data,'$.isRead')=0
+                               AND COALESCE(json_extract(m.data,'$.trashed'),0)=0
+                         GROUP BY s.account_id, s.folder",
+                    )
+                    .map_err(err)?;
+                let rows = q
+                    .query_map([], |r| {
+                        Ok(FolderUnread {
+                            account_id: r.get(0)?,
+                            folder: r.get(1)?,
+                            count: r.get(2)?,
+                        })
+                    })
+                    .map_err(err)?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(err)?;
+                rows
+            },
         })
     }
     pub fn detail(&self, id: &str) -> Result<Detail> {

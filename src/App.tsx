@@ -1351,6 +1351,11 @@ export default function App() {
                             name,
                           })
                         }
+                        unreadCounts={Object.fromEntries(
+                          (data.folderUnread ?? [])
+                            .filter((u) => u.accountId === a.id)
+                            .map((u) => [u.folder, u.count]),
+                        )}
                       />
                     </CollapsibleContent>
                   </Collapsible>

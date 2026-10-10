@@ -205,6 +205,16 @@ pub struct Snapshot {
     pub data_dir: String,
     pub matched: u64,
     pub remote_folders: Vec<RemoteFolder>,
+    /// 各账号/服务器文件夹的未读数（账号树徽标用）
+    pub folder_unread: Vec<FolderUnread>,
+}
+/// 账号内某个服务器文件夹的未读邮件数
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FolderUnread {
+    pub account_id: String,
+    pub folder: String,
+    pub count: u64,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
