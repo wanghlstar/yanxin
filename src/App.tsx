@@ -1150,6 +1150,9 @@ export default function App() {
           return folder ? remoteFolderLabel(folder) : query.remoteFolder;
         })()
       : query.folder || activeAccount?.name || viewNames[query.view];
+  const unreadTotal = (data.folderUnread ?? [])
+    .filter((f) => !query.accountId || f.accountId === query.accountId)
+    .reduce((sum, f) => sum + f.count, 0);
   const nav = (view: string, Icon: typeof Inbox, count?: number) => (
     <Button
       variant="ghost"
@@ -2086,7 +2089,12 @@ export default function App() {
                     >
                       <TabsList>
                         <TabsTrigger value="all">全部</TabsTrigger>
-                        <TabsTrigger value="unread">未读</TabsTrigger>
+                        <TabsTrigger value="unread">
+                          未读
+                          {!!unreadTotal && (
+                            <em className="tab-count">{unreadTotal}</em>
+                          )}
+                        </TabsTrigger>
                       </TabsList>
                     </Tabs>
                     <DropdownMenu>

@@ -710,18 +710,28 @@ button.nav-item {
   color: var(--muted);
 }
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 3px;
+  height: 3px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: rgba(134, 134, 139, 0.4);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(134, 134, 139, 0.65);
+}
+.list-filters .tab-count {
+  font-style: normal;
+  font-size: 11px;
+  line-height: 18px;
+  margin-left: 5px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--secondary);
+  color: var(--foreground);
 }
 .reader {
   flex: 1;
@@ -2795,12 +2805,16 @@ button.nav-item {
 /* The card supplies the visible border; place its drag target on that border. */
 .navigation-handle {
   background: transparent;
-  transform: translateX(0);
+  transform: translateX(4px);
 }
-/* 命中区放在分隔线右侧（16px），避免与侧栏滚动条抢点击 */
-.navigation-handle::after {
+/* 命中区放在分隔线右侧，避开侧栏/邮件列表的滚动条 */
+.navigation-handle::after,
+.mail-pane-handle::after {
   left: 0;
   transform: none;
+}
+.mail-pane-handle {
+  transform: translateX(4px);
 }
 [data-slot="resizable-handle"].handle-hidden {
   width: 0;
@@ -3186,7 +3200,7 @@ button.nav-item {
   margin-right: 8px;
 }
 .remote-folder-list {
-  padding: 4px 8px 8px 12px;
+  padding: 4px 8px 8px 0;
 }
 .remote-folder-children {
   padding-left: 0;
