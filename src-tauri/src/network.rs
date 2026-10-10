@@ -3508,26 +3508,10 @@ fn apply_flag_session<T: std::io::Read + Write>(
     let blocked = |s: &str| Failure::Blocked(s.into());
     let (validity, uid, content_hash) =
         remote_identity(&op.remote_id).ok_or_else(|| blocked("服务器邮件标识无效，请重新收取"))?;
-    if op.action == "delete" {
-        // 彻底删除：标记 \Deleted 后 UID EXPUNGE，再确认邮件已不存在
-        session
-            .uid_store(uid.to_string(), "+FLAGS.SILENT (\\Deleted)")
-            .map_err(|e| flag_error("标记删除", e))?;
-        session
-            .uid_expunge(uid.to_string())
-            .map_err(|e| flag_error("清除邮件", e))?;
-        let gone = session
-            .uid_fetch(uid.to_string(), "(UID)")
-            .map(|f| f.iter().count() == 0)
-            .map_err(|e| flag_error("核对删除", e))?;
-        if !gone {
-            return Err(blocked("服务器未确认邮件已删除，本地存档保留"));
-        }
-        return Ok(());
-    }
     let flag = match op.action.as_str() {
         "read" => Flag::Seen,
         "star" => Flag::Flagged,
+        "delete" => Flag::Deleted,
         _ => return Err(blocked("不支持的服务器动作")),
     };
     // SELECT is deliberately the last mailbox selection before STORE. STATUS
@@ -3546,6 +3530,23 @@ fn apply_flag_session<T: std::io::Read + Write>(
         return Err(blocked("该服务器文件夹不允许永久修改此状态"));
     }
     let uid = uid.to_string();
+    if op.action == "delete" {
+        // 彻底删除：标记 \Deleted 后 UID EXPUNGE，再确认邮件已不存在
+        session
+            .uid_store(&uid, "+FLAGS.SILENT (\\Deleted)")
+            .map_err(|e| flag_error("标记删除", e))?;
+        session
+            .uid_expunge(&uid)
+            .map_err(|e| flag_error("清除邮件", e))?;
+        let gone = session
+            .uid_fetch(&uid, "(UID)")
+            .map(|f| f.iter().count() == 0)
+            .map_err(|e| flag_error("核对删除", e))?;
+        if !gone {
+            return Err(blocked("服务器未确认邮件已删除，本地存档保留"));
+        }
+        return Ok(());
+    }
     if let Some(expected_hash) = content_hash {
         // For servers without UIDVALIDITY, content identities are checked in
         // this selected session. Support both archived MIME and online headers.

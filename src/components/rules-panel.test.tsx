@@ -59,6 +59,15 @@ async function render(rules: Rule[] = []) {
       </SidebarProvider>,
     ),
   );
+  await expandRecords();
+}
+// 命中记录默认折叠，测试需先展开
+async function expandRecords() {
+  await act(async () => {
+    host
+      .querySelectorAll("button")
+      .forEach((b) => b.textContent?.includes("命中记录") && b.click());
+  });
 }
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

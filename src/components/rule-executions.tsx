@@ -13,7 +13,12 @@ import {
   CardContent,
   CardAction,
 } from "./ui/card";
-import { RefreshCw } from "lucide-react";
+import { ChevronRight, RefreshCw } from "lucide-react";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "./ui/collapsible";
 
 export type RuleExecution = {
   id: string;
@@ -112,50 +117,69 @@ export function RuleExecutions({ onShowTasks }: { onShowTasks: () => void }) {
             暂无服务器规则命中。预览匹配不会创建任务。
           </p>
         )}
-        <ul className="flex flex-col gap-4" aria-label="服务器规则命中记录">
-          {items?.map((item) => (
-            <li
-              key={item.id}
-              className="flex flex-wrap items-start justify-between gap-3"
+        <Collapsible defaultOpen={false}>
+          <CollapsibleTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full justify-between"
             >
-              <div className="flex min-w-0 flex-col gap-1">
-                <p className="break-words">
-                  {item.ruleName} · {item.subject || "（无主题）"}
-                </p>
-                <p className="text-sm text-muted-foreground">
-                  {item.accountEmail} ·{" "}
-                  {item.action === "serverMove" ? "移动" : "复制"} ·{" "}
-                  {item.source} → {item.target}
-                </p>
-                {item.error && (
-                  <p className="text-sm text-destructive">{item.error}</p>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">
-                  {states[item.status] || item.status}
-                </Badge>
-                {!item.operationId && item.status === "blocked" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => void retry(item.id)}
-                  >
-                    重新检查并入队
-                  </Button>
-                )}
-                {item.operationId &&
-                  item.status !== "completed" &&
-                  item.status !== "cancelled" && (
-                    <Button variant="outline" size="sm" onClick={onShowTasks}>
-                      查看服务器任务
-                    </Button>
-                  )}
-              </div>
-            </li>
-          ))}
-        </ul>
+              命中记录（{Math.min(items?.length ?? 0, 50)} /{" "}
+              {items?.length ?? 0}）
+              <ChevronRight size={14} className="collapse-chevron" />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <ul className="flex flex-col gap-4" aria-label="服务器规则命中记录">
+              {items?.map((item) => (
+                <li
+                  key={item.id}
+                  className="flex flex-wrap items-start justify-between gap-3"
+                >
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <p className="break-words">
+                      {item.ruleName} · {item.subject || "（无主题）"}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      {item.accountEmail} ·{" "}
+                      {item.action === "serverMove" ? "移动" : "复制"} ·{" "}
+                      {item.source} → {item.target}
+                    </p>
+                    {item.error && (
+                      <p className="text-sm text-destructive">{item.error}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline">
+                      {states[item.status] || item.status}
+                    </Badge>
+                    {!item.operationId && item.status === "blocked" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={busy}
+                        onClick={() => void retry(item.id)}
+                      >
+                        重新检查并入队
+                      </Button>
+                    )}
+                    {item.operationId &&
+                      item.status !== "completed" &&
+                      item.status !== "cancelled" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={onShowTasks}
+                        >
+                          查看服务器任务
+                        </Button>
+                      )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </CollapsibleContent>
+        </Collapsible>
       </CardContent>
     </Card>
   );

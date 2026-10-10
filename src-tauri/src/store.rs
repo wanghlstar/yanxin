@@ -281,12 +281,30 @@ impl Store {
         Ok(moved)
     }
     /// 彻底删除本地记录与存档文件（服务器删除确认后调用）。
+    /// 先删数据库行、后删文件：任何一步失败都不会留下"有记录无文件"的坏状态。
     pub fn purge_mail(&self, id: &str) -> Result<()> {
         let mail = self.mail(id)?;
         let rel = mail
             .rel_path
             .clone()
             .unwrap_or_else(|| format!("archive/{}.eml", mail.hash));
+        {
+            let mut db = self.db()?;
+            let tx = db
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(err)?;
+            tx.execute("DELETE FROM sources WHERE mail_id=?1", [id])
+                .map_err(err)?;
+            // server_operations 无 mail_id 列，mailId 存在 data JSON 里
+            tx.execute(
+                "DELETE FROM server_operations WHERE json_extract(data,'$.mailId')=?1",
+                [id],
+            )
+            .map_err(err)?;
+            tx.execute("DELETE FROM messages WHERE id=?1", [id])
+                .map_err(err)?;
+            tx.commit().map_err(err)?;
+        }
         let roots = self
             .archive_roots
             .read()
@@ -298,17 +316,6 @@ impl Store {
                 let _ = std::fs::remove_file(p);
             }
         }
-        let mut db = self.db()?;
-        let tx = db
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .map_err(err)?;
-        tx.execute("DELETE FROM sources WHERE mail_id=?1", [id])
-            .map_err(err)?;
-        tx.execute("DELETE FROM server_operations WHERE mail_id=?1", [id])
-            .map_err(err)?;
-        tx.execute("DELETE FROM messages WHERE id=?1", [id])
-            .map_err(err)?;
-        tx.commit().map_err(err)?;
         Ok(())
     }
     /// 取回：把外置根的存档文件搬回内部根（外置盘不在时跳过）。
