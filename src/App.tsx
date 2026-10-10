@@ -178,8 +178,34 @@ const viewNames: Record<string, string> = {
 function time(s: string) {
   const d = new Date(s);
   if (Number.isNaN(d.getTime())) return "时间未知";
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  return d.toLocaleString("zh-CN", { hour12: false });
+}
+function friendlyError(message: string) {
+  const text = message.toLowerCase();
+  if (text.includes("timed out") || text.includes("timeout"))
+    return "连接超时，请检查网络，稍后将自动重试";
+  if (text.includes("refused") || text.includes("connect error"))
+    return "无法连接服务器，请检查网络或服务器地址";
+  if (
+    text.includes("dns") ||
+    text.includes("resolve") ||
+    text.includes("not known")
+  )
+    return "无法解析服务器地址，请检查网络";
+  if (
+    text.includes("auth") ||
+    text.includes("login") ||
+    text.includes("credential") ||
+    text.includes("password")
+  )
+    return "登录失败，请检查账号或授权码";
+  if (
+    text.includes("tls") ||
+    text.includes("ssl") ||
+    text.includes("certificate")
+  )
+    return "安全连接失败，请检查端口与加密方式";
+  return message;
 }
 function savedListMode(): "conversations" | "messages" {
   try {
@@ -1259,7 +1285,11 @@ export default function App() {
                           if (open) void loadFolders(a.id);
                         }}
                       >
-                        <span className={`account-dot color-${i % 4}`} />
+                        <span
+                          className={`account-dot ${
+                            a.error || !a.enabled ? "offline" : "online"
+                          }`}
+                        />
                         <span>
                           {a.name}
                           <small>{a.email}</small>
@@ -1285,7 +1315,7 @@ export default function App() {
                             className="max-w-80 break-words"
                           >
                             <p>{a.email}</p>
-                            <p>{a.error}</p>
+                            <p>{friendlyError(a.error)}</p>
                           </TooltipContent>
                         </Tooltip>
                       )}
@@ -1588,12 +1618,13 @@ export default function App() {
                             </Badge>
                           </p>
                           <small>
-                            {a.error ||
-                              (!a.enabled
+                            {a.error
+                              ? friendlyError(a.error)
+                              : !a.enabled
                                 ? "账号已暂停"
                                 : a.lastSync
                                   ? `最近收取：${new Date(a.lastSync).toLocaleString("zh-CN")}`
-                                  : "已连接，等待首次收取")}
+                                  : "已连接，等待首次收取"}
                           </small>
                         </div>
                         <DropdownMenu>
@@ -2033,12 +2064,24 @@ export default function App() {
                   </div>
                   <div className="list-filters">
                     <Tabs
-                      value={query.unreadOnly ? "unread" : "all"}
+                      value={
+                        query.view === "unread" || query.unreadOnly
+                          ? "unread"
+                          : "all"
+                      }
                       onValueChange={(value) =>
-                        setQuery((q) => ({
-                          ...q,
-                          unreadOnly: value === "unread",
-                        }))
+                        setQuery((q) =>
+                          (q.view === "all" && !q.accountId) ||
+                          q.view === "unread"
+                            ? {
+                                ...q,
+                                view: value,
+                                unreadOnly: false,
+                                folder: "",
+                                remoteFolder: "",
+                              }
+                            : { ...q, unreadOnly: value === "unread" },
+                        )
                       }
                     >
                       <TabsList>

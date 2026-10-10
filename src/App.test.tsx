@@ -1007,7 +1007,10 @@ describe("reading unread mail within its current category", () => {
       expect(host.querySelector('button[title="标记未读"]')).not.toBeNull();
       const title = host.querySelector(".list-heading h1")?.textContent;
       await click(filter("全部"));
-      expect(host.querySelector(".list-heading h1")?.textContent).toBe(title);
+      // 全部收件箱的「未读」是全局未读视图，切回「全部」后标题回到全部收件箱
+      expect(host.querySelector(".list-heading h1")?.textContent).toBe(
+        title === "未读邮件" ? "全部收件箱" : title,
+      );
       expect(host.querySelector(".message-heading h1")?.textContent).toBe(
         subject,
       );
