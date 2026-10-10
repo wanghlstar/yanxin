@@ -1201,7 +1201,6 @@ export default function App() {
             <SidebarContent className="sidebar">
               <nav className="primary-nav">
                 {nav("all", Inbox, data.stats.unread)}
-                {nav("unread", MailIcon, data.stats.unread)}
                 {nav("starred", Star)}
                 {nav("sent", Send)}
                 <Button
