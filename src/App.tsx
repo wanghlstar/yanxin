@@ -25,7 +25,7 @@ import { FolderMappingDialog } from "./components/folder-mapping-dialog";
 import { RetentionDialog } from "./components/retention-dialog";
 import { ArchiveJobsPanel } from "./components/archive-jobs";
 import { RemoteFolderList } from "./components/remote-folder-list";
-import { remoteFolderLabel } from "./lib/remote-folders";
+import { remoteFolderLabel, compareFolders } from "./lib/remote-folders";
 import { coalesceRefresh } from "./lib/refresh-queue";
 import { ConversationReader } from "./components/conversation-reader";
 import { replyHeaders } from "./lib/conversations";
@@ -1201,6 +1201,7 @@ export default function App() {
             <SidebarContent className="sidebar">
               <nav className="primary-nav">
                 {nav("all", Inbox, data.stats.unread)}
+                {nav("unread", MailIcon, data.stats.unread)}
                 {nav("starred", Star)}
                 {nav("sent", Send)}
                 <Button
@@ -1412,19 +1413,28 @@ export default function App() {
                     <CollapsibleContent>
                       {[...group.folders]
                         .filter((f) => f.count > 0)
-                        .sort(
-                          (a, b) =>
-                            // 与"我的账号"的服务器文件夹顺序一致
-                            serverFolders.findIndex(
-                              (x) =>
-                                x.accountId === group.accountId &&
-                                x.name === a.name,
-                            ) -
-                            serverFolders.findIndex(
-                              (x) =>
-                                x.accountId === group.accountId &&
-                                x.name === b.name,
-                            ),
+                        .sort((a, b) =>
+                          // 与"我的账号"的文件夹树同一套排序（角色+中文拼音）
+                          compareFolders(
+                            {
+                              name: a.name,
+                              displayName: a.displayName || a.name,
+                              roles: serverFolders.find(
+                                (x) =>
+                                  x.accountId === group.accountId &&
+                                  x.name === a.name,
+                              )?.roles,
+                            },
+                            {
+                              name: b.name,
+                              displayName: b.displayName || b.name,
+                              roles: serverFolders.find(
+                                (x) =>
+                                  x.accountId === group.accountId &&
+                                  x.name === b.name,
+                              )?.roles,
+                            },
+                          ),
                         )
                         .map((f) => (
                           <Button
