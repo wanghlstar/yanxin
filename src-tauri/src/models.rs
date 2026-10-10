@@ -207,6 +207,8 @@ pub struct Snapshot {
     pub remote_folders: Vec<RemoteFolder>,
     /// 各账号/服务器文件夹的未读数（账号树徽标用）
     pub folder_unread: Vec<FolderUnread>,
+    /// 各账号/服务器文件夹的总数（全部/未读标签数量用）
+    pub folder_totals: Vec<FolderUnread>,
 }
 /// 账号内某个服务器文件夹的未读邮件数
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -1306,6 +1306,28 @@ impl Store {
                     .map_err(err)?;
                 rows
             },
+            folder_totals: {
+                let mut q = db
+                    .prepare(
+                        "SELECT s.account_id, s.folder, COUNT(DISTINCT s.mail_id)
+                         FROM trusted_sources s JOIN messages m ON m.id = s.mail_id
+                         WHERE s.active=1 AND COALESCE(json_extract(m.data,'$.trashed'),0)=0
+                         GROUP BY s.account_id, s.folder",
+                    )
+                    .map_err(err)?;
+                let rows = q
+                    .query_map([], |r| {
+                        Ok(FolderUnread {
+                            account_id: r.get(0)?,
+                            folder: r.get(1)?,
+                            count: r.get(2)?,
+                        })
+                    })
+                    .map_err(err)?
+                    .collect::<std::result::Result<Vec<_>, _>>()
+                    .map_err(err)?;
+                rows
+            },
         })
     }
     pub fn detail(&self, id: &str) -> Result<Detail> {

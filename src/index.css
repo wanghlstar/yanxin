@@ -267,6 +267,15 @@ button.nav-item {
   border-radius: 4px;
   color: var(--foreground);
 }
+.nav-item em.unread {
+  background: color-mix(in srgb, var(--primary) 16%, transparent);
+  color: var(--primary);
+  font-weight: 600;
+}
+/* 主导航与写邮件按钮对齐：图标缩进到与写邮件图标同一 x */
+.primary-nav .nav-item {
+  padding-left: 21px;
+}
 .nav-item small {
   font-size: 12px;
   font-weight: 400;
@@ -709,19 +718,10 @@ button.nav-item {
   font-size: 12px;
   color: var(--muted);
 }
-::-webkit-scrollbar {
-  width: 3px;
-  height: 3px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(134, 134, 139, 0.4);
-  border-radius: 2px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(134, 134, 139, 0.65);
+/* 系统悬浮滚动条：整体调细、调淡（::-webkit-scrollbar 在 WebView 中不渲染） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(134, 134, 139, 0.45) transparent;
 }
 .list-filters .tab-count {
   font-style: normal;
@@ -2755,7 +2755,7 @@ button.nav-item {
 .navigation-panel > .mail-sidebar {
   width: 100%;
   height: 100%;
-  padding: 0 3px 0 0;
+  padding: 0 0 0 0;
   background: transparent;
 }
 .navigation-panel > .mail-sidebar > .sidebar {
@@ -2791,6 +2791,10 @@ button.nav-item {
   height: 100%;
   border-right: 0;
 }
+/* 邮件列表右侧留间隙，让悬浮滚动条不顶到分隔条（参考侧栏做法） */
+.mail-list-panel {
+  padding-right: 6px;
+}
 .mail-reader-panel > .reader {
   width: 100%;
   height: 100%;
@@ -2807,11 +2811,12 @@ button.nav-item {
   background: transparent;
   transform: translateX(4px);
 }
-/* 命中区放在分隔线右侧，避开侧栏/邮件列表的滚动条 */
+/* 命中区放在分隔线右侧并收窄，避开面板滚动条 */
 .navigation-handle::after,
 .mail-pane-handle::after {
   left: 0;
   transform: none;
+  width: 10px;
 }
 .mail-pane-handle {
   transform: translateX(4px);

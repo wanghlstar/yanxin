@@ -1150,10 +1150,40 @@ export default function App() {
           return folder ? remoteFolderLabel(folder) : query.remoteFolder;
         })()
       : query.folder || activeAccount?.name || viewNames[query.view];
-  const unreadTotal = (data.folderUnread ?? [])
-    .filter((f) => !query.accountId || f.accountId === query.accountId)
+  const unreadTotal = (data.folderUnread ?? []).filter(
+    (f) => !query.accountId || f.accountId === query.accountId,
+  );
+  // 标签数量跟随当前范围：文件夹内只算该文件夹，收件箱上下文算全部
+  const scopedUnread = unreadTotal.filter(
+    (f) => !query.remoteFolder || f.folder === query.remoteFolder,
+  );
+  const unreadBadge = query.remoteFolder
+    ? (scopedUnread[0]?.count ?? 0)
+    : query.view === "all" || query.view === "unread"
+      ? scopedUnread.reduce((sum, f) => sum + f.count, 0)
+      : 0;
+  const scopedTotals = (data.folderTotals ?? []).filter(
+    (f) =>
+      (!query.accountId || f.accountId === query.accountId) &&
+      (!query.remoteFolder || f.folder === query.remoteFolder),
+  );
+  const totalBadge = query.remoteFolder
+    ? (scopedTotals[0]?.count ?? 0)
+    : query.view === "all" || query.view === "unread"
+      ? scopedTotals
+          .filter((f) => f.folder.toUpperCase() === "INBOX")
+          .reduce((sum, f) => sum + f.count, 0)
+      : 0;
+  const inboxTotal = (data.folderTotals ?? [])
+    .filter((f) => f.folder.toUpperCase() === "INBOX")
     .reduce((sum, f) => sum + f.count, 0);
-  const nav = (view: string, Icon: typeof Inbox, count?: number) => (
+  const allUnread = unreadTotal.reduce((sum, f) => sum + f.count, 0);
+  const nav = (
+    view: string,
+    Icon: typeof Inbox,
+    total?: number,
+    unread?: number,
+  ) => (
     <Button
       variant="ghost"
       className={`nav-item ${page === "mail" && query.view === view && !query.accountId && !query.folder ? "active" : ""}`}
@@ -1162,7 +1192,8 @@ export default function App() {
     >
       <Icon size={17} />
       <span>{viewNames[view]}</span>
-      {!!count && <em>{count}</em>}
+      {!!total && <em>{total}</em>}
+      {!!unread && <em className="unread">{unread}</em>}
     </Button>
   );
   return (
@@ -1229,7 +1260,7 @@ export default function App() {
             </SidebarHeader>
             <SidebarContent className="sidebar">
               <nav className="primary-nav">
-                {nav("all", Inbox, data.stats.unread)}
+                {nav("all", Inbox, inboxTotal, allUnread)}
                 {nav("starred", Star)}
                 {nav("sent", Send)}
                 <Button
@@ -2088,11 +2119,16 @@ export default function App() {
                       }
                     >
                       <TabsList>
-                        <TabsTrigger value="all">全部</TabsTrigger>
+                        <TabsTrigger value="all">
+                          全部
+                          {!!totalBadge && (
+                            <em className="tab-count">{totalBadge}</em>
+                          )}
+                        </TabsTrigger>
                         <TabsTrigger value="unread">
                           未读
-                          {!!unreadTotal && (
-                            <em className="tab-count">{unreadTotal}</em>
+                          {!!unreadBadge && (
+                            <em className="tab-count">{unreadBadge}</em>
                           )}
                         </TabsTrigger>
                       </TabsList>

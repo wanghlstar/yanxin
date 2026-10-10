@@ -127,6 +127,7 @@ export interface Snapshot {
   matched: number;
   remoteFolders?: RemoteFolder[];
   folderUnread?: FolderUnread[];
+  folderTotals?: FolderUnread[];
 }
 export interface Detail {
   mail: Mail;
