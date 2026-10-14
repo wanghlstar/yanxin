@@ -1,0 +1,35 @@
+name: Checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@1.91.1
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      - run: npm run format:check
+      # 项目 Rust 保持手工紧凑风格，rustfmt 漂移仅警示不阻塞检查
+      - name: Rust formatting (advisory)
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check || echo "::warning::Rust 代码存在 rustfmt 风格漂移（不阻塞检查）"
+      - run: npm test
+      - run: npm run test:desktop
+      - run: npm run build
+      - run: npm run test:rust
+      - run: cargo test --manifest-path src-tauri/vendor/imap-proto/Cargo.toml
